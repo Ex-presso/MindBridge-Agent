@@ -46,3 +46,6 @@ venv.bak/
 
 # MacOS
 .DS_Store
+
+# Agent documentation
+AGENTS.md

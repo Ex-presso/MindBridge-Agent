@@ -1,14 +1,26 @@
-from pydantic_settings import BaseSettings
-import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
 class Settings(BaseSettings):
-    HOST: str = os.getenv("HOST", "127.0.0.1")
-    PORT: int = os.getenv("PORT", 8080)
-    DEBUG: bool = os.getenv("DEBUG", False)
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    LOG_FILE: str = os.getenv("LOG_FILE", "app.log")
-    LOG_MAX_BYTES: int = os.getenv("LOG_MAX_BYTES", 1000000)
-    LOG_BACKUP_COUNT: int = os.getenv("LOG_BACKUP_COUNT", 5)
-    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    HOST: str = "127.0.0.1"
+    PORT: int = 8080
+    DEBUG: bool = False
+    OPENAI_MODEL: str = "gpt-5"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    OPENAI_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    MODEL_TEMPERATURE: float = 0.3
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "app.log"
+    LOG_MAX_BYTES: int = 1000000
+    LOG_BACKUP_COUNT: int = 5
+    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).parent.parent / ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore"
+    )
 
 settings = Settings()

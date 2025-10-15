@@ -1,12 +1,12 @@
 """
 Mental Health Chatbot backend server
 """
-
 from fastapi import FastAPI
 from app.api import router
 from contextlib import asynccontextmanager
 from config.settings import settings
 import uvicorn
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
