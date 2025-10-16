@@ -3,14 +3,13 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 from langchain_community.vectorstores.faiss import FAISS
-from config.settings import Settings
+from langchain_core.vectorstores.base import VectorStoreRetriever
+from config.settings import settings
 
 from tqdm import tqdm
 import os
 
 from pathlib import Path
-
-settings = Settings()
 
 class VectorStore:
     def __init__(self):
@@ -63,9 +62,10 @@ class VectorStore:
         return self.vectorstore
     
 
-    def as_retriever(self, k: int = 3):
+    def get_retriever(self, k: int = 3) -> VectorStoreRetriever:
         assert self.vectorstore is not None, "Vectorstore not built/loaded"
         return self.vectorstore.as_retriever(search_kwargs={"k": k})
+
 
 def _count_chunks(chunk_size=1000, chunk_overlap=100):
     ds = load_dataset("ShenLab/MentalChat16K")["train"]
@@ -78,6 +78,7 @@ def _count_chunks(chunk_size=1000, chunk_overlap=100):
         total += n
         per_sample.append(n)
     print(f"Samples: {len(per_sample)}, Total chunks: {total}, Avg chunks/sample: {sum(per_sample)/len(per_sample):.2f}")
+
 
 if __name__ == "__main__":
 
@@ -92,7 +93,7 @@ if __name__ == "__main__":
 
     # simple test
     query = "I feel anxious all the time and can't sleep well."
-    results = vectorstore.as_retriever().invoke(query)
+    results = vectorstore.get_retriever(k=3).invoke(query)
     for r in results:
         print("---- Page Content ----")
         print(r.page_content[:400])
