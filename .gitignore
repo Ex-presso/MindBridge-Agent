@@ -49,3 +49,7 @@ venv.bak/
 
 # Agent documentation
 AGENTS.md
+
+# Index for RAG
+backend/data/MentalChat16K_faiss_index/
+*.index

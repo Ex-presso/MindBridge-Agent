@@ -4,12 +4,13 @@ OpenAI compatible response schemas.
 """
 
 from pydantic import BaseModel, Field
+from typing import Literal
 import time, uuid
 
 # --- common response ---
 
 class ChatMessage(BaseModel):
-    role: str
+    role: Literal["user", "assistant", "system"]
     content: str
 
 
@@ -24,12 +25,16 @@ class Choice(BaseModel):
 #     completion_tokens: int = 0
 #     total_tokens: int = 0
 
+class ChatCompletionRequest(BaseModel):
+    model: Literal["openai", "gemini"] = "gemini"
+    messages: list[ChatMessage]
+    temperature: float | None = 0.3
 
 class ChatCompletionResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:12]}")
     object: str = "chat.completion"
     created: int = Field(default_factory=lambda: int(time.time()))
-    model: str = "gemini-2.5-flash"
+    model: Literal["openai", "gemini"] = "gemini"
     choices: list[Choice] 
     #usage: Optional[Usage] = None
 

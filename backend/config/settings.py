@@ -7,15 +7,20 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     OPENAI_MODEL: str = "gpt-5"
     GEMINI_MODEL: str = "gemini-2.5-flash"
-    OPENAI_API_KEY: str = ""
-    GEMINI_API_KEY: str = ""
+    OPENAI_API_KEY: str | None = None   
+    GEMINI_API_KEY: str | None = None
     MODEL_TEMPERATURE: float = 0.3
+
+
+    PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]  # => backend/
+    DATA_DIR: Path = PROJECT_ROOT / "data"
+    INDEX_DIR: Path = DATA_DIR / "MentalChat16K_faiss_index"
+
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "app.log"
     LOG_MAX_BYTES: int = 1000000
     LOG_BACKUP_COUNT: int = 5
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent.parent / ".env",
         env_file_encoding="utf-8",
