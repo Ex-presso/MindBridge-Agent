@@ -4,7 +4,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import START, END, StateGraph
 
 from app.core.llm.provider import get_llm
-from app.core.rag.vectore_store import VectorStore
+from backend.app.core.rag.vector_store import VectorStore
 import operator
 
 
