@@ -51,26 +51,40 @@ class Agent:
                     "feel free to share what's on your mind whenever you're ready."
                 )
             )
-            return State(messages=[fallback], context=[])
+            return State(messages=[fallback], context=state.get("context", []))
 
-        # should it be str(last_user_msg.content) or last_user_msg.content?
-        enhanced_messages = self._build_enhanced_messages(str(last_user_msg.content), state.get("context", []))
+        # Extract message content safely (handle both str and list types)
+        content = last_user_msg.content
+        if isinstance(content, list):
+            # If content is a list, extract text content
+            content = " ".join(str(item) if isinstance(item, str) else str(item.get("text", "")) for item in content)
+        
+        # Use the current context from this retrieval cycle
+        current_context = state.get("context", [])
+        enhanced_messages = self._build_enhanced_messages(content, current_context)
         
         sys = SystemMessage(content=self.system_prompt)
 
         response = self.llm.invoke([sys, enhanced_messages])
-        return State(messages=[response], context=[])
+        return State(messages=[response], context=state.get("context", []))
        
     
 
     def _retrieve_context(self, state: State) -> State:
         last_user_msg = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-        query = last_user_msg.content if last_user_msg else ""
-
-        retriever = get_retriever(k=3)
         
-        # should it be str(last_user_msg.content) or last_user_msg.content?
-        results = retriever.invoke(str(query)) if query else []
+        if not last_user_msg:
+            return State(messages=[], context=[])
+        
+        # Extract content safely (handle both str and list types)
+        content = last_user_msg.content
+        if isinstance(content, list):
+            content = " ".join(str(item) if isinstance(item, str) else str(item.get("text", "")) for item in content)
+        
+        query: str = content if content else ""
+        
+        retriever = get_retriever(k=3)
+        results = retriever.invoke(query) if query else []
 
         return State(messages=[], context=[r.page_content for r in results])
     

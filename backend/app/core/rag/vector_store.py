@@ -1,3 +1,4 @@
+from typing import Any
 from datasets import DatasetDict, load_dataset
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -12,7 +13,7 @@ from pathlib import Path
 
 class VectorStore:
     def __init__(self):
-        self.ds: DatasetDict | None = None
+        self.ds: Any = None  # DatasetDict has complex typing, use Any for flexibility
         self.vectorstore: FAISS | None = None
         self.embedding = GoogleGenerativeAIEmbeddings(model="text-embedding-004", google_api_key=settings.GEMINI_API_KEY)
         self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
@@ -27,7 +28,8 @@ class VectorStore:
         docs: list[Document] = []
 
         for ex in tqdm(self.ds["train"], desc="Building chunks"):
-            assistant_output = ex.get("output") or ""
+            # ex is a dict-like object from the dataset
+            assistant_output: str = ex.get("output", "") or ""
 
             chunks = self.text_splitter.split_text(assistant_output)
 
