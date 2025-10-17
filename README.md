@@ -1,4 +1,4 @@
-# PsyConnect Agent
+# MindBridge Agent
 
 PsyConnect Agent is a mental-health-focused conversational assistant that blends large language models with retrieval-augmented generation. The backend (FastAPI + LangGraph) exposes an OpenAI-compatible API so tools like OpenWebUI can reuse their existing chat UI while taking advantage of PsyConnect’s counseling-centric behaviors.
 
