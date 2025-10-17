@@ -53,3 +53,9 @@ AGENTS.md
 # Index for RAG
 backend/data/MentalChat16K_faiss_index/
 *.index
+
+# Log file
+*.log
+
+# old file
+*_bak.py
