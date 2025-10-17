@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     LOG_MAX_BYTES: int = 1000000
     LOG_BACKUP_COUNT: int = 5
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent.parent / ".env",
         env_file_encoding="utf-8",

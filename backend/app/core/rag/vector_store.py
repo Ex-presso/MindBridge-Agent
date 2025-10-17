@@ -1,4 +1,4 @@
-from datasets import load_dataset
+from datasets import DatasetDict, load_dataset
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
@@ -7,12 +7,13 @@ from langchain_core.vectorstores.base import VectorStoreRetriever
 from config.settings import settings
 
 from tqdm import tqdm
-import os
 
 from pathlib import Path
 
 class VectorStore:
     def __init__(self):
+        self.ds: DatasetDict | None = None
+        self.vectorstore: FAISS | None = None
         self.embedding = GoogleGenerativeAIEmbeddings(model="text-embedding-004", google_api_key=settings.GEMINI_API_KEY)
         self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
 
@@ -48,16 +49,23 @@ class VectorStore:
         docs = self._example_to_document()
 
         self.vectorstore = FAISS.from_documents(docs, self.embedding)
-        os.makedirs(os.path.dirname(settings.INDEX_DIR), exist_ok=True)
-        self.vectorstore.save_local(settings.INDEX_DIR)
+
+        index_dir = settings.INDEX_DIR
+        index_dir.parent.mkdir(parents=True, exist_ok=True)
+        self.vectorstore.save_local(str(index_dir))
 
         return self.vectorstore
     
 
     def load(self) -> FAISS:
-        assert settings.INDEX_DIR is not None, "INDEX_DIR not set"
+        assert settings.INDEX_DIR is not None, "INDEX_DIR not set in configuration"
+
+        index_dir = settings.INDEX_DIR
+        if not index_dir.exists():
+            raise FileNotFoundError(f"Index not found at {index_dir}")
+        
         self.vectorstore = FAISS.load_local(
-            settings.INDEX_DIR, self.embedding, allow_dangerous_deserialization=True
+            str(index_dir), self.embedding, allow_dangerous_deserialization=True
         )
         return self.vectorstore
     

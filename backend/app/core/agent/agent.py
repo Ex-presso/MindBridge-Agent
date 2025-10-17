@@ -1,18 +1,26 @@
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import START, END, StateGraph
+from langgraph.graph.message import add_messages
 
 from app.core.llm.provider import get_llm
-from backend.app.core.rag.vector_store import VectorStore
-import operator
+from app.services.rag import get_retriever
+
+
+def merge_context(existing: list[str] | None, new: list[str] | None) -> list[str]:
+    """Aggregator that safely merges retrieved context snippets across nodes."""
+    existing_list = list(existing) if existing else []
+    if not new:
+        return existing_list
+    return [*existing_list, *new]
 
 
 class State(TypedDict):
     """State container for the LangGraph chat flow."""
 
-    messages: Annotated[list[BaseMessage], operator.add]
-    context: Annotated[list[str], operator.add]
+    messages: Annotated[list[BaseMessage], add_messages]
+    context: Annotated[list[str], merge_context]
 
 
 class Agent:
@@ -20,14 +28,13 @@ class Agent:
 
     def __init__(self, provider: str):
         self.llm = get_llm(provider)
-        self.vectorstore = VectorStore()
         
         self.system_prompt = """
         You are a compassionate and knowledgeable mental health assistant modeled after a professional counselor.
         Your responses should be warm, empathetic, and supportive while remaining factual and safe.
         Use the retrieved context—which consists of counselor responses from real or synthetic mental health conversations—to inspire and guide your answer.
         Paraphrase or summarize relevant insights from the context rather than copying text verbatim.
-        If the context does not contain enough relevant information, respond with "I don't know" and, if appropriate, gently encourage the user to seek professional support.
+        When the retrieved context is sparse or missing, offer a gentle introduction, validate the user's feelings, and invite them to share more.
         Do not provide medical diagnoses, prescribe medication, or offer crisis intervention advice.
         """
 
@@ -38,7 +45,13 @@ class Agent:
         last_user_msg = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
 
         if last_user_msg is None:
-            return {"messages": [HumanMessage(content="User message is empty")]}
+            fallback = AIMessage(
+                content=(
+                    "Hi, I'm your mental health companion. I'm here to listen and support you—"
+                    "feel free to share what's on your mind whenever you're ready."
+                )
+            )
+            return {"messages": [fallback]}
 
 
         enhanced_messages = self._build_enhanced_messages(last_user_msg.content, state.get("context", []))
@@ -49,14 +62,13 @@ class Agent:
         return {"messages": [response]}
        
     
- 
+
     def _retrieve_context(self, state: State) -> State:
         last_user_msg = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
         query = last_user_msg.content if last_user_msg else ""
 
-        self.vectorstore.load()
-
-        results = self.vectorstore.get_retriever(k=3).invoke(query)
+        retriever = get_retriever(k=3)
+        results = retriever.invoke(query) if query else []
 
         return {"context": [r.page_content for r in results]}
     
@@ -73,10 +85,9 @@ class Agent:
         prompt = (
             f"{ctx_block}"
             f"User message:\n{user_message}\n\n"
-            "The context above contains sample counselor responses and psychological insights related to similar topics. "
-            "Write a supportive and empathetic reply to the user's message using ideas or patterns from the context where appropriate. "
-            "Do not copy sentences directly. "
-            "If the context is not relevant or insufficient, respond with 'I don't know' and, if suitable, gently suggest that the user seek professional guidance."
+            "Craft a supportive, empathetic reply that validates the user's experience. "
+            "Reference relevant ideas from the retrieved examples when they exist, phrasing them in your own words. "
+            "When examples are unavailable or do not apply, introduce yourself warmly, encourage the user to share more, and offer gentle, non-clinical guidance."
         )
 
         return HumanMessage(content=prompt)
@@ -92,5 +103,5 @@ class Agent:
         return graph
 
     def invoke(self, message: str) -> str:
-        result = self.app.invoke({"messages": [HumanMessage(content=message)]})
+        result = self.app.invoke({"messages": [HumanMessage(content=message)], "context": []})
         return result["messages"][-1].content
