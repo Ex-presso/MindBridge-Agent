@@ -8,7 +8,7 @@ def list_models():
    
     return ModelResponse(
         data=[
-            Model(id="gemini-2.5-flash", owned_by="google"),
+            Model(id="gemini-2.5-flash", owned_by="google_genai"),
             Model(id="gpt-5", owned_by="openai"),
         ]
     )

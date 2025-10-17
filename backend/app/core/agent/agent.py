@@ -51,15 +51,15 @@ class Agent:
                     "feel free to share what's on your mind whenever you're ready."
                 )
             )
-            return {"messages": [fallback]}
+            return State(messages=[fallback], context=[])
 
-
-        enhanced_messages = self._build_enhanced_messages(last_user_msg.content, state.get("context", []))
+        # should it be str(last_user_msg.content) or last_user_msg.content?
+        enhanced_messages = self._build_enhanced_messages(str(last_user_msg.content), state.get("context", []))
         
         sys = SystemMessage(content=self.system_prompt)
 
         response = self.llm.invoke([sys, enhanced_messages])
-        return {"messages": [response]}
+        return State(messages=[response], context=[])
        
     
 
@@ -68,9 +68,11 @@ class Agent:
         query = last_user_msg.content if last_user_msg else ""
 
         retriever = get_retriever(k=3)
-        results = retriever.invoke(query) if query else []
+        
+        # should it be str(last_user_msg.content) or last_user_msg.content?
+        results = retriever.invoke(str(query)) if query else []
 
-        return {"context": [r.page_content for r in results]}
+        return State(messages=[], context=[r.page_content for r in results])
     
 
     def _build_enhanced_messages(self, user_message: str, contexts: list[str]) -> HumanMessage:

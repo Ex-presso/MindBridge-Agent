@@ -12,7 +12,7 @@ def get_llm(provider: str) -> BaseChatModel:
             temperature=settings.MODEL_TEMPERATURE, 
             api_key=settings.OPENAI_API_KEY
         )    
-    elif provider == "gemini":
+    elif provider == "google_genai":
         return ChatGoogleGenerativeAI(
             model=settings.GEMINI_MODEL,
             temperature=settings.MODEL_TEMPERATURE, 
