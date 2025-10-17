@@ -20,17 +20,22 @@ router = APIRouter()
 
 DEFAULT_PROVIDER = "google_genai"
 
+
 def _resolve_provider(request: ChatCompletionRequest) -> str:
     if request.provider:
         return request.provider.lower()
-    else:
-        return DEFAULT_PROVIDER
+
+    model_name = request.model.lower()
+    if "gpt" in model_name or "openai" in model_name:
+        return "openai"
+    if "gemini" in model_name:
+        return "google_genai"
+    return DEFAULT_PROVIDER
 
 
-def _extract_user_message(request: ChatCompletionRequest) -> str:
-    for message in reversed(request.messages):
-        if message.role == "user":
-            return message.content
+def _ensure_user_message(request: ChatCompletionRequest) -> None:
+    if any(message.role == "user" for message in request.messages):
+        return
     raise HTTPException(status_code=400, detail="At least one user message is required.")
 
 
@@ -63,10 +68,12 @@ def _build_chunk_payload(chunk_id: str, created_at: int, model: str, content: st
 @router.post("/chat/completions")
 def chat(request: ChatCompletionRequest):
     provider = _resolve_provider(request)
-    user_message = _extract_user_message(request)
+    if not request.messages:
+        raise HTTPException(status_code=400, detail="Messages list cannot be empty.")
+    _ensure_user_message(request)
 
     try:
-        reply = run_chat(provider, user_message)
+        reply = run_chat(provider, request.messages)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

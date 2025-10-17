@@ -1,4 +1,5 @@
-from typing import Annotated, TypedDict
+from collections.abc import Sequence
+from typing import Annotated, Any, TypedDict, cast
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import START, END, StateGraph
@@ -28,7 +29,7 @@ class Agent:
 
     def __init__(self, provider: str):
         self.llm = get_llm(provider)
-        
+
         self.system_prompt = """
         You are a compassionate and knowledgeable mental health assistant modeled after a professional counselor.
         Your responses should be warm, empathetic, and supportive while remaining factual and safe.
@@ -40,54 +41,49 @@ class Agent:
 
         self.app = self._build_graph().compile()
 
-
     def _chat_node(self, state: State) -> State:
-        last_user_msg = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-
-        if last_user_msg is None:
+        messages = list(state["messages"])
+        last_user_index = next(
+            (idx for idx in range(len(messages) - 1, -1, -1) if isinstance(messages[idx], HumanMessage)),
+            None,
+        )
+        if last_user_index is None:
             fallback = AIMessage(
                 content=(
                     "Hi, I'm your mental health companion. I'm here to listen and support you—"
                     "feel free to share what's on your mind whenever you're ready."
                 )
             )
-            return State(messages=[fallback], context=state.get("context", []))
+            context = list(state.get("context", []))
+            return {"messages": [fallback], "context": context}
 
-        # Extract message content safely (handle both str and list types)
-        content = last_user_msg.content
-        if isinstance(content, list):
-            # If content is a list, extract text content
-            content = " ".join(str(item) if isinstance(item, str) else str(item.get("text", "")) for item in content)
-        
-        # Use the current context from this retrieval cycle
-        current_context = state.get("context", [])
-        enhanced_messages = self._build_enhanced_messages(content, current_context)
-        
-        sys = SystemMessage(content=self.system_prompt)
+        last_user_msg = cast(HumanMessage, messages[last_user_index])
+        normalized_content = self._normalize_content(last_user_msg.content)
+        current_context = list(state.get("context", []))
 
-        response = self.llm.invoke([sys, enhanced_messages])
-        return State(messages=[response], context=state.get("context", []))
-       
-    
+        enhanced_user = self._build_enhanced_messages(normalized_content, current_context)
+        system_instruction = SystemMessage(content=self.system_prompt)
+
+        history_before_last = messages[:last_user_index]
+
+        llm_input: list[BaseMessage] = [system_instruction, *history_before_last, enhanced_user]
+
+        response = self.llm.invoke(llm_input)
+        return {"messages": [response], "context": current_context}
 
     def _retrieve_context(self, state: State) -> State:
         last_user_msg = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-        
+
         if not last_user_msg:
-            return State(messages=[], context=[])
-        
-        # Extract content safely (handle both str and list types)
-        content = last_user_msg.content
-        if isinstance(content, list):
-            content = " ".join(str(item) if isinstance(item, str) else str(item.get("text", "")) for item in content)
-        
+            return {"messages": [], "context": []}
+
+        content = self._normalize_content(last_user_msg.content)
         query: str = content if content else ""
-        
+
         retriever = get_retriever(k=3)
         results = retriever.invoke(query) if query else []
 
-        return State(messages=[], context=[r.page_content for r in results])
-    
+        return {"messages": [], "context": [r.page_content for r in results]}
 
     def _build_enhanced_messages(self, user_message: str, contexts: list[str]) -> HumanMessage:
         ctx_block = ""
@@ -107,7 +103,22 @@ class Agent:
         )
 
         return HumanMessage(content=prompt)
-    
+
+    @staticmethod
+    def _normalize_content(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    value = item.get("text")
+                    if isinstance(value, str):
+                        parts.append(value)
+            return " ".join(parts)
+        return str(content)
 
     def _build_graph(self) -> StateGraph:
         graph = StateGraph(State)
@@ -118,6 +129,13 @@ class Agent:
         graph.add_edge("chat", END)
         return graph
 
-    def invoke(self, message: str) -> str:
-        result = self.app.invoke({"messages": [HumanMessage(content=message)], "context": []})
-        return result["messages"][-1].content
+    def invoke(self, messages: Sequence[BaseMessage]) -> str:
+        state = {"messages": list(messages), "context": []}
+        result = self.app.invoke(state)
+        ai_message = next(
+            (m for m in reversed(result["messages"]) if isinstance(m, AIMessage)),
+            None,
+        )
+        if ai_message is None:
+            raise RuntimeError("Agent did not produce an assistant message.")
+        return cast(str, ai_message.content)
