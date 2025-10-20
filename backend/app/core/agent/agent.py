@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 import logging
 from typing import Annotated, Any, TypedDict, cast
+from typing import Sequence, Optional
 
 from langchain_core.messages import (
     AIMessage,
@@ -20,6 +21,38 @@ from app.services.rag import get_retriever
 logger = logging.getLogger(__name__)
 
 
+# === NEW: Rogerian reflection helper ==========================================
+
+def rogerian_reflection(user_message: str) -> str:
+    """
+    Reformulate the user's message in a reflective, non-directive, and empathetic tone.
+    Inspired by Rogerian therapy and ELIZA.
+    """
+    reflections = [
+        ("i feel", "It sounds like you feel"),
+        ("i think", "It seems like you think"),
+        ("i am", "You seem to be"),
+        ("i’m", "You seem to be"),
+        ("i was", "It seems you were"),
+        ("i can’t", "You find it difficult to"),
+        ("i want", "You wish to"),
+        ("because", "What makes you feel that way about"),
+        ("sometimes", "Sometimes it feels that way, doesn’t it"),
+        ("maybe", "Perhaps you’re uncertain about"),
+    ]
+
+    lower_msg = user_message.lower()
+    for trigger, reflection in reflections:
+        if trigger in lower_msg:
+            rest = user_message[lower_msg.index(trigger) + len(trigger):].strip()
+            if rest:
+                return f"{reflection} {rest}?"
+            return f"{reflection}?"
+    # fallback when no trigger found
+    return f"Can you tell me more about that?"
+
+
+# === Agent ====================================================================
 
 class State(TypedDict):
     """State container for the LangGraph chat flow."""
@@ -297,48 +330,35 @@ class Agent:
             return " ".join(parts)
         return str(content)
 
+    # === MODIFIED: includes Rogerian reflection ==================================
     def _augment_user_message(self, user_message: str, *, is_related: bool) -> str:
+        reflection = rogerian_reflection(user_message)
+
         guidance = (
             "Instructions for the assistant:\n"
             "- Offer empathetic mental health support tailored to the user's emotions and concerns.\n"
-            "- Reference retrieved counselor examples when available, paraphrasing them naturally.\n"
+            "- Reflect the user's feelings and thoughts in a Rogerian (non-directive) style.\n"
+            "- Reference retrieved counselor examples when available, paraphrasing naturally.\n"
             f"- {self._redirect_instruction}\n"
-            "- Keep the reply concise, safe, and free of clinical diagnoses or medication advice.\n"
+            "- Keep the reply compassionate, brief, and free of clinical diagnoses or medication advice.\n"
         )
+
         if not is_related:
             guidance += (
-                "- The latest user request appears unrelated to mental health. Gently decline to answer the unrelated topic "
-                "and invite the user to share how they are feeling instead.\n"
+                "- The latest user request appears unrelated to mental health. "
+                "Gently decline the topic and invite them to share how they are feeling instead.\n"
             )
-        return f"{guidance}\nUser message:\n{user_message}"
+
+        return f"{guidance}\nUser message:\n{user_message}\n\nReflective cue for assistant:\n{reflection}"
+    # ============================================================================
 
     @staticmethod
     def _is_mental_health_related(message: str) -> bool:
         lowered = message.lower()
         keywords = [
-            "anxiety",
-            "anxious",
-            "stress",
-            "stressed",
-            "depress",
-            "depressed",
-            "lonely",
-            "loneliness",
-            "panic",
-            "fear",
-            "sad",
-            "overwhelmed",
-            "therapy",
-            "counsel",
-            "mental",
-            "emotion",
-            "feel",
-            "cope",
-            "coping",
-            "support",
-            "burnout",
-            "grief",
-            "trauma",
+            "anxiety", "anxious", "stress", "stressed", "depress", "depressed", "lonely", "loneliness",
+            "panic", "fear", "sad", "overwhelmed", "therapy", "counsel", "mental", "emotion",
+            "feel", "cope", "coping", "support", "burnout", "grief", "trauma",
         ]
         return any(keyword in lowered for keyword in keywords)
 
@@ -358,11 +378,28 @@ class Agent:
         graph.add_edge("use_tool", "chat")
         return graph
 
-    def invoke(self, messages: Sequence[BaseMessage]) -> str:
+    # === MODIFIED: emotion-aware invoke ==========================================
+    def invoke(self, messages: Sequence[BaseMessage], emotion: Optional[str] = None) -> str:
+        """
+        Invoke the agent with emotion-aware reflection.
+        Adjusts system prompt and reflection cues based on the detected user emotion.
+        """
+        reflection_prompt = self._get_reflection_prompt(emotion)
+        if emotion:
+            system_msg = SystemMessage(
+                content=(
+                    f"You are a compassionate assistant. The user seems {emotion.lower()}. "
+                    f"Adjust your response accordingly: {reflection_prompt}."
+                )
+            )
+        else:
+            system_msg = self._system_message
+
         state: State = {
-            "messages": list(messages),
+            "messages": [system_msg, *messages],
             "tool_iterations": 0,
         }
+
         result = self.app.invoke(state)
         ai_message = next(
             (m for m in reversed(result["messages"]) if isinstance(m, AIMessage)),
@@ -371,3 +408,19 @@ class Agent:
         if ai_message is None:
             raise RuntimeError("Agent did not produce an assistant message.")
         return cast(str, ai_message.content)
+
+    def _get_reflection_prompt(self, emotion: Optional[str]) -> str:
+        """Return response behavior based on emotion."""
+        if not emotion:
+            return "Respond naturally and kindly."
+        mapping = {
+            "sadness": "Be gentle and supportive, reflect empathy softly.",
+            "joy": "Be enthusiastic but balanced, mirror positivity.",
+            "anger": "Be calm, acknowledge frustration, and de-escalate softly.",
+            "fear": "Be reassuring, emphasize safety and control.",
+            "disgust": "Be understanding and neutral, avoid amplifying emotion.",
+            "surprise": "Acknowledge curiosity and invite further sharing.",
+            "neutral": "Respond naturally and helpfully.",
+            "anxiety": "Be calming and comforting, reduce intensity in tone."
+        }
+        return mapping.get(emotion.lower(), "Respond naturally and kindly.")

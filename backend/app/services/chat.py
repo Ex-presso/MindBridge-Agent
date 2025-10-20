@@ -7,6 +7,14 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from app.core.agent.agent import Agent
 from app.schemas.conversation import ChatMessage
 
+# --- NEW: imports for emotion detection ---
+from transformers import pipeline
+
+# cache the model for efficiency
+@lru_cache(maxsize=1)
+def get_emotion_analyzer():
+    return pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=False)
+
 
 @lru_cache(maxsize=8)
 def _get_agent(provider: str) -> Agent:
@@ -43,4 +51,11 @@ def run_chat(provider: str, history: Sequence[ChatMessage]) -> str:
     if not has_user_message:
         raise ValueError("Chat history must include at least one user message.")
 
-    return agent.invoke(messages)
+    # --- NEW: detect emotion from the last user message ---
+    emotion_analyzer = get_emotion_analyzer()
+    last_user_msg = [m for m in messages if isinstance(m, HumanMessage)][-1]
+    emotion_result = emotion_analyzer(last_user_msg.content)[0]
+    emotion = emotion_result["label"]
+
+    # pass emotion info to the agent
+    return agent.invoke(messages, emotion=emotion)
