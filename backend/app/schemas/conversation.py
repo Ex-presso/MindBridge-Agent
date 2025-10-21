@@ -9,6 +9,7 @@ RoleLiteral = Literal["system", "user", "assistant"]
 class ChatMessage(BaseModel):
     role: RoleLiteral
     content: str
+    emotion: str | None = None  # Optional
 
 
 class ChatCompletionRequest(BaseModel):

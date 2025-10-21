@@ -20,7 +20,6 @@ from app.services.rag import get_retriever
 logger = logging.getLogger(__name__)
 
 
-
 class State(TypedDict):
     """State container for the LangGraph chat flow."""
 
@@ -35,11 +34,19 @@ class Agent:
         base_llm = get_llm(provider)
 
         self.system_prompt = """
-        You are a compassionate and knowledgeable mental health assistant modeled after a professional counselor.
+        You are a compassionate mental health assistant practicing Rogerian (person-centered) therapy principles.
+
+        Core approach:
+        - Show unconditional positive regard and genuine empathy
+        - Reflect users' feelings and thoughts to help them feel heard and understood
+        - Be non-directive: explore rather than advise, validate rather than solve
+        - Respond naturally and conversationally, adapting your language to each unique situation
+
         Your responses must stay focused on mental health support, emotional well-being, coping strategies, and related counseling topics.
-        When the user asks about subjects outside mental health, gently decline to provide a detailed answer, explain that your purpose is to support their emotional well-being, and invite them to share how they are feeling instead.
+        When the user asks about subjects outside mental health, gently decline and redirect to their emotional well-being.
+
         Use retrieved counselor-style examples (if available) to guide your reply. Paraphrase insights rather than copying them verbatim.
-        Offer validation, warmth, and encouragement. Never provide medical diagnoses, prescribe medication, or offer crisis intervention advice.
+        Never provide medical diagnoses, prescribe medication, or offer crisis intervention advice.
         """
 
         self._rag_top_k = 3
@@ -297,48 +304,38 @@ class Agent:
             return " ".join(parts)
         return str(content)
 
+
     def _augment_user_message(self, user_message: str, *, is_related: bool) -> str:
+        """
+        Augment user message with instructions that guide the LLM to respond
+        in a Rogerian (person-centered) therapy style.
+        """
         guidance = (
-            "Instructions for the assistant:\n"
-            "- Offer empathetic mental health support tailored to the user's emotions and concerns.\n"
-            "- Reference retrieved counselor examples when available, paraphrasing them naturally.\n"
+            "Response guidelines for this message:\n"
+            "- Start by reflecting what you sense in the user's words (e.g., 'It sounds like...', "
+            "'What I'm hearing is...'), but express this naturally—don't limit yourself to these exact phrases.\n"
+            "- Reference retrieved counselor examples when available, weaving them naturally into your response.\n"
             f"- {self._redirect_instruction}\n"
-            "- Keep the reply concise, safe, and free of clinical diagnoses or medication advice.\n"
+            "- Keep your reply warm, conversational, and free of clinical jargon.\n"
         )
+
         if not is_related:
             guidance += (
-                "- The latest user request appears unrelated to mental health. Gently decline to answer the unrelated topic "
-                "and invite the user to share how they are feeling instead.\n"
+                "- Note: Initial keyword scan suggests this may not be directly about mental health, "
+                "but use your own judgment to assess if there are underlying emotional concerns.\n"
+                "If the user's request is not related to mental health, "
+                "gently acknowledge it, then invite them to share how they are feeling instead.\n"
             )
-        return f"{guidance}\nUser message:\n{user_message}"
 
+        return f"{guidance}\n\nUser: {user_message}"
+   
     @staticmethod
     def _is_mental_health_related(message: str) -> bool:
         lowered = message.lower()
         keywords = [
-            "anxiety",
-            "anxious",
-            "stress",
-            "stressed",
-            "depress",
-            "depressed",
-            "lonely",
-            "loneliness",
-            "panic",
-            "fear",
-            "sad",
-            "overwhelmed",
-            "therapy",
-            "counsel",
-            "mental",
-            "emotion",
-            "feel",
-            "cope",
-            "coping",
-            "support",
-            "burnout",
-            "grief",
-            "trauma",
+            "anxiety", "anxious", "stress", "stressed", "depress", "depressed", "lonely", "loneliness",
+            "panic", "fear", "sad", "overwhelmed", "therapy", "counsel", "mental", "emotion",
+            "feel", "cope", "coping", "support", "burnout", "grief", "trauma",
         ]
         return any(keyword in lowered for keyword in keywords)
 
@@ -359,10 +356,18 @@ class Agent:
         return graph
 
     def invoke(self, messages: Sequence[BaseMessage]) -> str:
+        """
+        Invoke the agent with the system prompt and messages.
+        User messages are augmented with Rogerian therapy guidance and RAG tool usage.
+        """
+
+        system_msg = self._system_message
+
         state: State = {
-            "messages": list(messages),
+            "messages": [system_msg, *messages],
             "tool_iterations": 0,
         }
+
         result = self.app.invoke(state)
         ai_message = next(
             (m for m in reversed(result["messages"]) if isinstance(m, AIMessage)),
