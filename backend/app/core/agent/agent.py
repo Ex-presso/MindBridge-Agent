@@ -1,7 +1,6 @@
 from collections.abc import Sequence
 import logging
 from typing import Annotated, Any, TypedDict, cast
-from typing import Sequence, Optional
 
 from langchain_core.messages import (
     AIMessage,
@@ -21,39 +20,6 @@ from app.services.rag import get_retriever
 logger = logging.getLogger(__name__)
 
 
-# === NEW: Rogerian reflection helper ==========================================
-
-def rogerian_reflection(user_message: str) -> str:
-    """
-    Reformulate the user's message in a reflective, non-directive, and empathetic tone.
-    Inspired by Rogerian therapy and ELIZA.
-    """
-    reflections = [
-        ("i feel", "It sounds like you feel"),
-        ("i think", "It seems like you think"),
-        ("i am", "You seem to be"),
-        ("i’m", "You seem to be"),
-        ("i was", "It seems you were"),
-        ("i can’t", "You find it difficult to"),
-        ("i want", "You wish to"),
-        ("because", "What makes you feel that way about"),
-        ("sometimes", "Sometimes it feels that way, doesn’t it"),
-        ("maybe", "Perhaps you’re uncertain about"),
-    ]
-
-    lower_msg = user_message.lower()
-    for trigger, reflection in reflections:
-        if trigger in lower_msg:
-            rest = user_message[lower_msg.index(trigger) + len(trigger):].strip()
-            if rest:
-                return f"{reflection} {rest}?"
-            return f"{reflection}?"
-    # fallback when no trigger found
-    return f"Can you tell me more about that?"
-
-
-# === Agent ====================================================================
-
 class State(TypedDict):
     """State container for the LangGraph chat flow."""
 
@@ -68,11 +34,19 @@ class Agent:
         base_llm = get_llm(provider)
 
         self.system_prompt = """
-        You are a compassionate and knowledgeable mental health assistant modeled after a professional counselor.
+        You are a compassionate mental health assistant practicing Rogerian (person-centered) therapy principles.
+
+        Core approach:
+        - Show unconditional positive regard and genuine empathy
+        - Reflect users' feelings and thoughts to help them feel heard and understood
+        - Be non-directive: explore rather than advise, validate rather than solve
+        - Respond naturally and conversationally, adapting your language to each unique situation
+
         Your responses must stay focused on mental health support, emotional well-being, coping strategies, and related counseling topics.
-        When the user asks about subjects outside mental health, gently decline to provide a detailed answer, explain that your purpose is to support their emotional well-being, and invite them to share how they are feeling instead.
+        When the user asks about subjects outside mental health, gently decline and redirect to their emotional well-being.
+
         Use retrieved counselor-style examples (if available) to guide your reply. Paraphrase insights rather than copying them verbatim.
-        Offer validation, warmth, and encouragement. Never provide medical diagnoses, prescribe medication, or offer crisis intervention advice.
+        Never provide medical diagnoses, prescribe medication, or offer crisis intervention advice.
         """
 
         self._rag_top_k = 3
@@ -330,28 +304,31 @@ class Agent:
             return " ".join(parts)
         return str(content)
 
-    # === MODIFIED: includes Rogerian reflection ==================================
-    def _augment_user_message(self, user_message: str, *, is_related: bool) -> str:
-        reflection = rogerian_reflection(user_message)
 
+    def _augment_user_message(self, user_message: str, *, is_related: bool) -> str:
+        """
+        Augment user message with instructions that guide the LLM to respond
+        in a Rogerian (person-centered) therapy style.
+        """
         guidance = (
-            "Instructions for the assistant:\n"
-            "- Offer empathetic mental health support tailored to the user's emotions and concerns.\n"
-            "- Reflect the user's feelings and thoughts in a Rogerian (non-directive) style.\n"
-            "- Reference retrieved counselor examples when available, paraphrasing naturally.\n"
+            "Response guidelines for this message:\n"
+            "- Start by reflecting what you sense in the user's words (e.g., 'It sounds like...', "
+            "'What I'm hearing is...'), but express this naturally—don't limit yourself to these exact phrases.\n"
+            "- Reference retrieved counselor examples when available, weaving them naturally into your response.\n"
             f"- {self._redirect_instruction}\n"
-            "- Keep the reply compassionate, brief, and free of clinical diagnoses or medication advice.\n"
+            "- Keep your reply warm, conversational, and free of clinical jargon.\n"
         )
 
         if not is_related:
             guidance += (
-                "- The latest user request appears unrelated to mental health. "
-                "Gently decline the topic and invite them to share how they are feeling instead.\n"
+                "- Note: Initial keyword scan suggests this may not be directly about mental health, "
+                "but use your own judgment to assess if there are underlying emotional concerns.\n"
+                "If the user's request is not related to mental health, "
+                "gently acknowledge it, then invite them to share how they are feeling instead.\n"
             )
 
-        return f"{guidance}\nUser message:\n{user_message}\n\nReflective cue for assistant:\n{reflection}"
-    # ============================================================================
-
+        return f"{guidance}\n\nUser: {user_message}"
+   
     @staticmethod
     def _is_mental_health_related(message: str) -> bool:
         lowered = message.lower()
@@ -378,22 +355,13 @@ class Agent:
         graph.add_edge("use_tool", "chat")
         return graph
 
-    # === MODIFIED: emotion-aware invoke ==========================================
-    def invoke(self, messages: Sequence[BaseMessage], emotion: Optional[str] = None) -> str:
+    def invoke(self, messages: Sequence[BaseMessage]) -> str:
         """
-        Invoke the agent with emotion-aware reflection.
-        Adjusts system prompt and reflection cues based on the detected user emotion.
+        Invoke the agent with the system prompt and messages.
+        User messages are augmented with Rogerian therapy guidance and RAG tool usage.
         """
-        reflection_prompt = self._get_reflection_prompt(emotion)
-        if emotion:
-            system_msg = SystemMessage(
-                content=(
-                    f"You are a compassionate assistant. The user seems {emotion.lower()}. "
-                    f"Adjust your response accordingly: {reflection_prompt}."
-                )
-            )
-        else:
-            system_msg = self._system_message
+
+        system_msg = self._system_message
 
         state: State = {
             "messages": [system_msg, *messages],
@@ -408,19 +376,3 @@ class Agent:
         if ai_message is None:
             raise RuntimeError("Agent did not produce an assistant message.")
         return cast(str, ai_message.content)
-
-    def _get_reflection_prompt(self, emotion: Optional[str]) -> str:
-        """Return response behavior based on emotion."""
-        if not emotion:
-            return "Respond naturally and kindly."
-        mapping = {
-            "sadness": "Be gentle and supportive, reflect empathy softly.",
-            "joy": "Be enthusiastic but balanced, mirror positivity.",
-            "anger": "Be calm, acknowledge frustration, and de-escalate softly.",
-            "fear": "Be reassuring, emphasize safety and control.",
-            "disgust": "Be understanding and neutral, avoid amplifying emotion.",
-            "surprise": "Acknowledge curiosity and invite further sharing.",
-            "neutral": "Respond naturally and helpfully.",
-            "anxiety": "Be calming and comforting, reduce intensity in tone."
-        }
-        return mapping.get(emotion.lower(), "Respond naturally and kindly.")
