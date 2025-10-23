@@ -42,10 +42,13 @@ venv.bak/
 # IDEs
 .vscode/
 .idea/
-.cursor/
+*.swp
+*.swo
+*~
 
 # MacOS
 .DS_Store
+Thumbs.db
 
 # Agent documentation
 AGENTS.md
