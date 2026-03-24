@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --muted: #f8fafc;
+  --muted-foreground: #64748b;
+  --border: #e2e8f0;
+  --sidebar-bg: #f8fafc;
+  --sidebar-width: 260px;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --destructive: #ef4444;
+  --ring: #6366f1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f172a;
+    --foreground: #f1f5f9;
+    --muted: #1e293b;
+    --muted-foreground: #94a3b8;
+    --border: #1e293b;
+    --sidebar-bg: #0f172a;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Markdown styles for assistant messages */
+.prose h1, .prose h2, .prose h3 { font-weight: 600; margin-top: 1em; margin-bottom: 0.5em; }
+.prose h1 { font-size: 1.25em; }
+.prose h2 { font-size: 1.1em; }
+.prose p { margin-bottom: 0.75em; line-height: 1.6; }
+.prose ul, .prose ol { padding-left: 1.5em; margin-bottom: 0.75em; }
+.prose li { margin-bottom: 0.25em; }
+.prose code { background: var(--muted); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.875em; font-family: var(--font-mono); }
+.prose pre { background: var(--muted); padding: 1em; border-radius: 6px; overflow-x: auto; margin-bottom: 0.75em; }
+.prose pre code { background: none; padding: 0; }
+.prose blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); margin: 0.5em 0; }
+.prose a { color: var(--primary); text-decoration: underline; }
+.prose strong { font-weight: 600; }

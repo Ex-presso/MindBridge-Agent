@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from threading import Lock
+import asyncio
 from typing import Optional
 
 from langchain_core.vectorstores.base import VectorStoreRetriever
@@ -9,28 +9,36 @@ from app.core.rag.vector_store import VectorStore
 from config.settings import settings
 
 _vector_store: Optional[VectorStore] = None
-_lock = Lock()
+_lock = asyncio.Lock()
 
 
-def _ensure_vector_store() -> VectorStore:
+def _load_store_sync() -> VectorStore:
+    """Blocking I/O — runs in thread executor."""
+    store = VectorStore(backend="pgvector")
+    try:
+        store.load()
+    except Exception:
+        store = VectorStore(backend="faiss")
+        try:
+            store.load()
+        except FileNotFoundError:
+            store.build()
+    return store
+
+
+async def _ensure_vector_store() -> VectorStore:
     global _vector_store
     if _vector_store is not None:
         return _vector_store
 
-    with _lock:
+    async with _lock:
         if _vector_store is None:
-            store = VectorStore()
-            try:
-                store.load()
-            except FileNotFoundError:
-                index_dir = settings.INDEX_DIR
-                index_dir.parent.mkdir(parents=True, exist_ok=True)
-                store.build()
-            _vector_store = store
-        return _vector_store
+            loop = asyncio.get_event_loop()
+            _vector_store = await loop.run_in_executor(None, _load_store_sync)
+    return _vector_store
 
 
-def get_retriever(k: int = 3) -> VectorStoreRetriever:
-    """Return a cached retriever, building the FAISS index on first access if missing."""
-    store = _ensure_vector_store()
+async def get_retriever(k: int | None = None) -> VectorStoreRetriever:
+    """Return a cached retriever. Safe to call concurrently."""
+    store = await _ensure_vector_store()
     return store.get_retriever(k)

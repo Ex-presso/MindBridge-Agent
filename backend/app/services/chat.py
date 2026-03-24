@@ -1,6 +1,5 @@
-from collections.abc import Sequence
-from functools import lru_cache
-from typing import Final
+"""Chat service — orchestrates agent invocation for both legacy and session-aware endpoints."""
+from collections.abc import AsyncGenerator, Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -8,39 +7,32 @@ from app.core.agent.agent import Agent
 from app.schemas.conversation import ChatMessage
 
 
-@lru_cache(maxsize=8)
-def _get_agent(provider: str) -> Agent:
-    return Agent(provider)
-
-
-def _convert_message(message: ChatMessage) -> BaseMessage:
-    """Map an incoming chat completion message to a LangChain message type."""
+def convert_message(message: ChatMessage) -> BaseMessage:
     role = message.role
     content = message.content
-
     if role == "system":
         return SystemMessage(content=content)
     if role == "user":
         return HumanMessage(content=content)
-    if role == "assistant":
-        return AIMessage(content=content)
-
-    error: Final[str] = f"Unsupported role: {role}"
-    raise ValueError(error)
+    return AIMessage(content=content)
 
 
-def run_chat(provider: str, history: Sequence[ChatMessage]) -> str:
-    """Execute the chat graph for the given provider using the full message history."""
+async def run_chat_legacy(agent: Agent, history: Sequence[ChatMessage]) -> str:
+    """Stateless: takes full message history. Used by the legacy /chat/completions endpoint."""
     if not history:
         raise ValueError("At least one message is required.")
+    messages = [convert_message(m) for m in history]
+    if not any(isinstance(m, HumanMessage) for m in messages):
+        raise ValueError("History must contain at least one user message.")
+    return await agent.ainvoke_legacy(messages)
 
-    normalized = provider.lower()
-    agent = _get_agent(normalized)
 
-    messages = [_convert_message(item) for item in history]
+async def run_chat_session(agent: Agent, new_message: str, thread_id: str) -> str:
+    """Stateful: passes only the new message; history is in the checkpointer."""
+    return await agent.ainvoke(HumanMessage(content=new_message), thread_id=thread_id)
 
-    has_user_message = any(isinstance(msg, HumanMessage) for msg in messages)
-    if not has_user_message:
-        raise ValueError("Chat history must include at least one user message.")
 
-    return agent.invoke(messages)
+async def stream_chat_session(agent: Agent, new_message: str, thread_id: str) -> AsyncGenerator[str, None]:
+    """Real token streaming for the session-aware endpoint."""
+    async for token in agent.astream_tokens(HumanMessage(content=new_message), thread_id=thread_id):
+        yield token

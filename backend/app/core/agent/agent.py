@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 import logging
 from typing import Annotated, Any, TypedDict, cast
 
@@ -30,7 +30,7 @@ class State(TypedDict):
 class Agent:
     """LangGraph-driven mental health agent with conditional RAG tool usage."""
 
-    def __init__(self, provider: str):
+    def __init__(self, provider: str, checkpointer=None):
         base_llm = get_llm(provider)
 
         self.system_prompt = """
@@ -60,25 +60,25 @@ class Agent:
             "to share how they are feeling instead of answering the unrelated question."
         )
 
-        self.app = self._build_graph().compile()
+        self.app = self._build_graph().compile(checkpointer=checkpointer)
 
     def _build_tools(self) -> dict[str, StructuredTool]:
         """Create the tool set exposed to the LLM."""
 
-        def fetch_mental_health_examples(query: str) -> str:
+        async def fetch_mental_health_examples(query: str) -> str:
             logger.info("RAG tool invoked with raw query=%r", query)
             normalized_query = self._normalize_content(query).strip()
             if not normalized_query:
                 logger.info("RAG tool received empty query after normalization.")
                 return "No relevant counselor examples found because the query was empty."
 
-            retriever = get_retriever(k=self._rag_top_k)
+            retriever = await get_retriever(k=self._rag_top_k)
             logger.info(
                 "RAG retriever invoked with top_k=%s; normalized_query=%r",
                 self._rag_top_k,
                 normalized_query,
             )
-            results = retriever.invoke(normalized_query)
+            results = await retriever.ainvoke(normalized_query)
 
             if not results:
                 logger.info("RAG returned zero documents.")
@@ -103,14 +103,14 @@ class Agent:
         )
 
         rag_tool = StructuredTool.from_function(
-            func=fetch_mental_health_examples,
+            coroutine=fetch_mental_health_examples,
             name="fetch_mental_health_examples",
             description=description,
         )
 
         return {rag_tool.name: rag_tool}
 
-    def _chat_node(self, state: State) -> State:
+    async def _chat_node(self, state: State) -> State:
         messages = list(state["messages"])
         has_user_message = any(isinstance(msg, HumanMessage) for msg in messages)
 
@@ -143,6 +143,14 @@ class Agent:
                 },
             )
 
+        # Reset tool iterations when this is a fresh user turn
+        # (last message is HumanMessage = new user input just added by checkpointer)
+        last_msg = messages[-1] if messages else None
+        if isinstance(last_msg, HumanMessage):
+            tool_iterations = 0
+        else:
+            tool_iterations = state.get("tool_iterations", 0)
+
         last_user_msg = cast(HumanMessage, messages[last_user_index])
         normalized_user = self._normalize_content(last_user_msg.content)
         is_related = self._is_mental_health_related(normalized_user)
@@ -155,16 +163,16 @@ class Agent:
 
         llm_input: list[BaseMessage] = [self._system_message, *working_messages]
 
-        response = self.llm.invoke(llm_input)
+        response = await self.llm.ainvoke(llm_input)
         return cast(
             State,
             {
                 "messages": [response],
-                "tool_iterations": state.get("tool_iterations", 0),
+                "tool_iterations": tool_iterations,
             },
         )
 
-    def _tool_node(self, state: State) -> State:
+    async def _tool_node(self, state: State) -> State:
         messages = list(state["messages"])
         last_ai_message = next(
             (msg for msg in reversed(messages) if isinstance(msg, AIMessage) and msg.tool_calls),
@@ -228,9 +236,9 @@ class Agent:
                     args,
                     call_id,
                 )
-                output = tool.invoke(args)
+                output = await tool.ainvoke(args)
                 logger.info("Tool '%s' completed successfully (call_id=%s)", name, call_id)
-            except Exception as exc:  
+            except Exception as exc:
                 logger.exception("Tool '%s' failed during execution (call_id=%s)", name, call_id)
                 error_message = ToolMessage(
                     content=f"Tool '{name}' failed with error: {exc}",
@@ -304,7 +312,6 @@ class Agent:
             return " ".join(parts)
         return str(content)
 
-
     def _augment_user_message(self, user_message: str, *, is_related: bool) -> str:
         """
         Augment user message with instructions that guide the LLM to respond
@@ -328,7 +335,7 @@ class Agent:
             )
 
         return f"{guidance}\n\nUser: {user_message}"
-   
+
     @staticmethod
     def _is_mental_health_related(message: str) -> bool:
         lowered = message.lower()
@@ -357,22 +364,39 @@ class Agent:
 
     def invoke(self, messages: Sequence[BaseMessage]) -> str:
         """
+        Synchronous invoke for backward compatibility.
         Invoke the agent with the system prompt and messages.
-        User messages are augmented with Rogerian therapy guidance and RAG tool usage.
         """
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(self.ainvoke_legacy(messages))
 
-        system_msg = self._system_message
+    async def ainvoke_legacy(self, messages: Sequence[BaseMessage]) -> str:
+        """Stateless invocation (no checkpointer) — takes full message history."""
+        state: State = {"messages": list(messages), "tool_iterations": 0}
+        result = await self.app.ainvoke(state)
+        ai_msg = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage)), None)
+        if ai_msg is None:
+            raise RuntimeError("Agent produced no assistant message.")
+        return str(ai_msg.content)
 
-        state: State = {
-            "messages": [system_msg, *messages],
-            "tool_iterations": 0,
-        }
+    async def ainvoke(self, new_message: HumanMessage, thread_id: str) -> str:
+        """Invoke with checkpointer — only pass the new message, history is in checkpoint."""
+        config = {"configurable": {"thread_id": thread_id}}
+        result = await self.app.ainvoke({"messages": [new_message]}, config=config)
+        ai_msg = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage)), None)
+        if ai_msg is None:
+            raise RuntimeError("Agent produced no assistant message.")
+        return str(ai_msg.content)
 
-        result = self.app.invoke(state)
-        ai_message = next(
-            (m for m in reversed(result["messages"]) if isinstance(m, AIMessage)),
-            None,
-        )
-        if ai_message is None:
-            raise RuntimeError("Agent did not produce an assistant message.")
-        return cast(str, ai_message.content)
+    async def astream_tokens(self, new_message: HumanMessage, thread_id: str) -> AsyncGenerator[str, None]:
+        """Async generator that yields text tokens as they stream from the LLM."""
+        config = {"configurable": {"thread_id": thread_id}}
+        async for event in self.app.astream_events(
+            {"messages": [new_message]},
+            config=config,
+            version="v2",
+        ):
+            if event["event"] == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                if chunk.content:
+                    yield str(chunk.content)

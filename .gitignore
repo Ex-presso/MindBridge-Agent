@@ -26,9 +26,6 @@ cover/
 .pybuilder/
 target/
 
-# Streamlit
-.streamlit/secrets.toml
-
 # Environments
 .env
 .envrc
@@ -52,6 +49,7 @@ Thumbs.db
 
 # Agent documentation
 AGENTS.md
+.claude/    
 
 # Index for RAG
 backend/data/MentalChat16K_faiss_index/
@@ -62,3 +60,6 @@ backend/data/MentalChat16K_faiss_index/
 
 # old file
 *_bak.py
+
+# documents
+product_plan.md
