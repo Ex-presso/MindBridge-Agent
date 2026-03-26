@@ -79,9 +79,25 @@ async def session_chat(
         raise HTTPException(status_code=400, detail=f"Message exceeds {settings.MAX_MESSAGE_LENGTH} characters.")
 
     provider = body.provider.lower()
-    agent = request.app.state.stateful_agents.get(provider)
-    if agent is None:
-        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    # Load user's API key for this provider
+    from app.db.repositories import api_key_repo
+    from app.core.auth.encryption import decrypt_value
+    from app.core.llm.provider import get_llm
+    from app.core.agent.agent import Agent
+
+    key_record = await api_key_repo.get_by_provider(db, user.id, provider)
+    if key_record is None:
+        raise HTTPException(status_code=400, detail=f"No API key configured for provider '{provider}'. Add one in Settings.")
+
+    decrypted_key = decrypt_value(key_record.api_key_encrypted)
+    llm = get_llm(
+        provider,
+        api_key=decrypted_key,
+        base_url=key_record.base_url,
+        model=body.model,
+    )
+    checkpointer = getattr(request.app.state, "checkpointer", None)
+    agent = Agent(llm, checkpointer=checkpointer)
 
     # Create or validate conversation
     is_new_conversation = body.conversation_id is None

@@ -4,6 +4,7 @@ import { Brain, Heart, Moon, Wind } from "lucide-react";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChat } from "@/hooks/useChat";
 import { useConversations } from "@/hooks/useConversations";
+import { useApiKeys } from "@/hooks/useApiKeys";
 
 const STARTERS = [
   { icon: Heart, text: "I've been feeling anxious lately" },
@@ -15,6 +16,7 @@ const STARTERS = [
 export default function NewChatPage() {
   const router = useRouter();
   const { addConversation } = useConversations();
+  const { availableModels } = useApiKeys();
 
   const { sendMessage, isLoading } = useChat({
     conversationId: null,
@@ -58,7 +60,7 @@ export default function NewChatPage() {
         </div>
       </div>
 
-      <ChatInput onSend={sendMessage} isLoading={isLoading} />
+      <ChatInput onSend={sendMessage} isLoading={isLoading} models={availableModels} />
     </div>
   );
 }

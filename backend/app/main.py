@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
 
     # 1. Create DB tables (SQLAlchemy create_all; Alembic used for migrations in prod)
     from app.db.engine import engine, Base, AsyncSessionLocal
-    from app.db.models import User, Conversation, Message  # ensure models are registered
+    from app.db.models import User, Conversation, Message, UserApiKey  # ensure models are registered
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     app.state.db_session = AsyncSessionLocal
@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
         conninfo=settings.CHECKPOINT_DATABASE_URL,
         max_size=20,
         open=False,
+        kwargs={"autocommit": True, "prepare_threshold": 0},
     )
     await pool.open()
     checkpointer = AsyncPostgresSaver(pool)
@@ -81,16 +82,26 @@ async def lifespan(app: FastAPI):
     app.state.checkpointer = checkpointer
     app.state.pg_pool = pool
 
-    # 3. Create agents (stateless for legacy endpoint, stateful for session endpoint)
+    # 3. Create system agents (only for providers with keys in .env — used by legacy endpoint)
     from app.core.agent.agent import Agent
-    app.state.stateless_agents = {
-        "openai": Agent("openai", checkpointer=None),
-        "google_genai": Agent("google_genai", checkpointer=None),
-    }
-    app.state.stateful_agents = {
-        "openai": Agent("openai", checkpointer=checkpointer),
-        "google_genai": Agent("google_genai", checkpointer=checkpointer),
-    }
+    app.state.stateless_agents = {}
+    app.state.stateful_agents = {}
+
+    if settings.OPENAI_API_KEY:
+        try:
+            app.state.stateless_agents["openai"] = Agent("openai", checkpointer=None)
+            app.state.stateful_agents["openai"] = Agent("openai", checkpointer=checkpointer)
+            logger.info("OpenAI system agent created.")
+        except Exception as e:
+            logger.warning("Failed to create OpenAI agent: %s", e)
+
+    if settings.GEMINI_API_KEY:
+        try:
+            app.state.stateless_agents["google_genai"] = Agent("google_genai", checkpointer=None)
+            app.state.stateful_agents["google_genai"] = Agent("google_genai", checkpointer=checkpointer)
+            logger.info("Google GenAI system agent created.")
+        except Exception as e:
+            logger.warning("Failed to create Google agent: %s", e)
 
     logger.info("MindBridge backend ready.")
     yield

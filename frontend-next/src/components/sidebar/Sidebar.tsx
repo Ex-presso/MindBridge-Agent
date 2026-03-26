@@ -1,7 +1,7 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { Plus, MessageSquare } from "lucide-react";
+import { Plus, MessageSquare, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -68,6 +68,18 @@ export function Sidebar() {
           </div>
         ))}
       </ScrollArea>
+
+      <Separator />
+      <div className="p-3">
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sm text-[--muted-foreground]"
+          onClick={() => router.push("/chat/settings")}
+        >
+          <Settings className="h-4 w-4" />
+          API Keys
+        </Button>
+      </div>
     </aside>
   );
 }

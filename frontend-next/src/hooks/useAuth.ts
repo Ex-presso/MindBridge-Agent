@@ -11,7 +11,7 @@ export function useAuth() {
   const login = useCallback(
     async (email: string, password: string) => {
       const { access_token } = await api.auth.login({ email, password });
-      const userData = await api.auth.me.call({ accessToken: access_token } as never) ?? await fetchMe(access_token);
+      const userData = await fetchMe(access_token);
       setAuth(access_token, userData);
       router.push("/chat");
     },

@@ -30,8 +30,12 @@ class State(TypedDict):
 class Agent:
     """LangGraph-driven mental health agent with conditional RAG tool usage."""
 
-    def __init__(self, provider: str, checkpointer=None):
-        base_llm = get_llm(provider)
+    def __init__(self, provider_or_llm, checkpointer=None):
+        from langchain_core.language_models.chat_models import BaseChatModel
+        if isinstance(provider_or_llm, str):
+            base_llm = get_llm(provider_or_llm)
+        else:
+            base_llm = provider_or_llm
 
         self.system_prompt = """
         You are a compassionate mental health assistant practicing Rogerian (person-centered) therapy principles.

@@ -1,30 +1,38 @@
 "use client";
-import { useRef, useState, KeyboardEvent } from "react";
+import { useEffect, useRef, useState, KeyboardEvent } from "react";
 import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
-const MODELS = [
-  { label: "Gemini 2.5 Flash", model: "gemini-2.5-flash", provider: "google_genai" },
-  { label: "GPT-5", model: "gpt-5", provider: "openai" },
-];
+export interface ModelOption {
+  id: string;
+  name: string;
+  provider: string;
+}
 
 interface Props {
   onSend: (text: string, model: string, provider: string) => void;
   isLoading: boolean;
   disabled?: boolean;
+  models?: ModelOption[];
 }
 
-export function ChatInput({ onSend, isLoading, disabled }: Props) {
+export function ChatInput({ onSend, isLoading, disabled, models = [] }: Props) {
   const [text, setText] = useState("");
-  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(models[0] ?? { id: "", name: "No model", provider: "" });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const MAX = 4000;
 
+  useEffect(() => {
+    if (models.length > 0 && !models.find(m => m.id === selectedModel.id)) {
+      setSelectedModel(models[0]);
+    }
+  }, [models]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const submit = () => {
     const trimmed = text.trim();
-    if (!trimmed || isLoading || disabled) return;
-    onSend(trimmed, selectedModel.model, selectedModel.provider);
+    if (!trimmed || isLoading || disabled || !selectedModel.id) return;
+    onSend(trimmed, selectedModel.id, selectedModel.provider);
     setText("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -51,15 +59,16 @@ export function ChatInput({ onSend, isLoading, disabled }: Props) {
         {/* Model selector */}
         <div className="mb-2 flex items-center gap-2">
           <select
-            value={selectedModel.model}
+            value={selectedModel.id}
             onChange={(e) => {
-              const m = MODELS.find((m) => m.model === e.target.value);
+              const m = models.find((m) => m.id === e.target.value);
               if (m) setSelectedModel(m);
             }}
             className="text-xs border border-[--border] rounded px-2 py-1 bg-[--background] text-[--muted-foreground] cursor-pointer"
           >
-            {MODELS.map((m) => (
-              <option key={m.model} value={m.model}>{m.label}</option>
+            {models.length === 0 && <option value="">No API keys configured</option>}
+            {models.map((m) => (
+              <option key={`${m.provider}-${m.id}`} value={m.id}>{m.name}</option>
             ))}
           </select>
           {text.length > MAX * 0.8 && (
@@ -78,7 +87,7 @@ export function ChatInput({ onSend, isLoading, disabled }: Props) {
             onKeyDown={handleKeyDown}
             onInput={handleInput}
             rows={1}
-            placeholder="Share what's on your mind…"
+            placeholder="Share what's on your mind..."
             disabled={isLoading || disabled}
             className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-[--muted-foreground] disabled:opacity-50 max-h-[140px]"
           />

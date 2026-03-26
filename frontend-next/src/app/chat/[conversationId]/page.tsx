@@ -6,6 +6,7 @@ import { ChatWindow } from "@/components/chat/ChatWindow";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChat } from "@/hooks/useChat";
 import { useConversations } from "@/hooks/useConversations";
+import { useApiKeys } from "@/hooks/useApiKeys";
 import useSWR from "swr";
 
 interface Props {
@@ -16,6 +17,7 @@ export default function ConversationPage({ params }: Props) {
   const { conversationId } = use(params);
   const router = useRouter();
   const { refresh } = useConversations();
+  const { availableModels } = useApiKeys();
 
   const { data, isLoading: historyLoading, error } = useSWR(
     conversationId ? `/conversations/${conversationId}` : null,
@@ -54,7 +56,7 @@ export default function ConversationPage({ params }: Props) {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <ChatWindow messages={messages} isLoading={isLoading} />
-      <ChatInput onSend={sendMessage} isLoading={isLoading} />
+      <ChatInput onSend={sendMessage} isLoading={isLoading} models={availableModels} />
     </div>
   );
 }

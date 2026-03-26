@@ -1,5 +1,5 @@
 import { useAuthStore } from "@/stores/authStore";
-import type { Conversation, ConversationDetail, User } from "@/types";
+import type { ApiKeyConfig, Conversation, ConversationDetail, ProviderModels, User } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -81,5 +81,13 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ title }),
       }),
+  },
+  apiKeys: {
+    list: () => request<ApiKeyConfig[]>("/api/v1/api-keys"),
+    save: (data: { provider: string; api_key: string; base_url?: string; model_id?: string; display_name?: string }) =>
+      request<ApiKeyConfig>("/api/v1/api-keys", { method: "PUT", body: JSON.stringify(data) }),
+    delete: (provider: string) =>
+      request<void>(`/api/v1/api-keys/${provider}`, { method: "DELETE" }),
+    models: () => request<ProviderModels[]>("/api/v1/api-keys/models"),
   },
 };
