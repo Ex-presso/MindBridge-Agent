@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     RAG_CHUNK_OVERLAP: int = 100
     RAG_TOP_K: int = 3
 
-    # Embedding settings: "local" (LM Studio / Ollama) or "gemini"
-    EMBEDDING_PROVIDER: str = "local"
-    EMBEDDING_MODEL: str = "text-embedding-nomic-embed-text-v1.5"
+    # Embedding settings: "sentence_transformers", "local" (LM Studio / Ollama), or "gemini"
+    EMBEDDING_PROVIDER: str = "sentence_transformers"
+    EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
     EMBEDDING_BASE_URL: str = "http://localhost:1234/v1"
 
     # PostgreSQL / pgvector

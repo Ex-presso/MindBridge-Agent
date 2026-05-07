@@ -18,12 +18,29 @@ def get_embeddings() -> Embeddings:
     """Create embedding model based on settings.
 
     Supports:
+      - "sentence_transformers": Local model via sentence-transformers (recommended)
       - "local": OpenAI-compatible API (LM Studio, Ollama, etc.)
       - "gemini": Google Generative AI embeddings
     """
     provider = settings.EMBEDDING_PROVIDER.lower()
 
-    if provider == "local":
+    if provider == "sentence_transformers":
+        from langchain_core.embeddings import Embeddings as BaseEmbeddings
+        from sentence_transformers import SentenceTransformer
+
+        class SentenceTransformerEmbeddings(BaseEmbeddings):
+            def __init__(self, model_name: str):
+                self._model = SentenceTransformer(model_name)
+
+            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+                return self._model.encode(texts, show_progress_bar=len(texts) > 50).tolist()
+
+            def embed_query(self, text: str) -> list[float]:
+                return self._model.encode(text).tolist()
+
+        return SentenceTransformerEmbeddings(settings.EMBEDDING_MODEL)
+
+    elif provider == "local":
         from langchain_openai import OpenAIEmbeddings
 
         return OpenAIEmbeddings(
@@ -51,11 +68,13 @@ class VectorStore:
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
         collection_name: str | None = None,
+        max_samples: int | None = None,
     ):
         self.backend = backend
         self.chunk_size = chunk_size or settings.RAG_CHUNK_SIZE
         self.chunk_overlap = chunk_overlap or settings.RAG_CHUNK_OVERLAP
         self.collection_name = collection_name or settings.PGVECTOR_COLLECTION
+        self.max_samples = max_samples
 
         self.ds: Any = None
         self.vectorstore: Any = None
@@ -67,6 +86,8 @@ class VectorStore:
 
     def load_documents(self) -> None:
         self.ds = load_dataset("ShenLab/MentalChat16K")
+        if self.max_samples and len(self.ds["train"]) > self.max_samples:
+            self.ds["train"] = self.ds["train"].select(range(self.max_samples))
 
     def _example_to_documents(self) -> list[Document]:
         assert self.ds is not None, "Dataset not loaded"
