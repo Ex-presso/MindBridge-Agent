@@ -1,12 +1,13 @@
 # Prompting strategy comparison configuration
 
-eval_provider: "google_genai"
-eval_model: "gemini-2.5-flash"
+eval_provider: "local"
+eval_model: "nvidia/nemotron-3-nano-4b"
+eval_base_url: "http://localhost:1234/v1"
 judge_temperature: 0.1
-num_eval_queries: 50
+num_eval_queries: 10
 
-# RAG config (use best from RAG eval, or these defaults)
-rag_chunk_size: 1000
+# RAG config (best from RAG eval: chunk_size=2000 scored 4.86 avg)
+rag_chunk_size: 2000
 rag_chunk_overlap: 100
 rag_top_k: 3
 

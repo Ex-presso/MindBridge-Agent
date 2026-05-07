@@ -35,11 +35,10 @@ load_dotenv(ROOT / "backend" / ".env")
 
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config.settings import settings
-from metrics.judge import JudgeScores, LLMJudge, RetrievalRelevanceJudge
+from metrics.judge import JudgeScores, LLMJudge, RetrievalRelevanceJudge, _create_llm
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +65,9 @@ def build_vectorstore_for_config(
     chunk_size: int,
     chunk_overlap: int,
     collection_name: str,
+    max_samples: int | None = None,
 ) -> None:
     """Build a pgvector collection with specific chunking parameters."""
-    from datasets import load_dataset
-
     from app.core.rag.vector_store import VectorStore
 
     store = VectorStore(
@@ -77,6 +75,7 @@ def build_vectorstore_for_config(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         collection_name=collection_name,
+        max_samples=max_samples,
     )
     store.build()
 
@@ -103,7 +102,7 @@ def get_retriever_for_config(
 def generate_response(
     query: str,
     retrieved_docs: list[str],
-    llm: ChatGoogleGenerativeAI,
+    llm,
 ) -> str:
     """Generate a therapy response using retrieved context."""
     system_prompt = (
@@ -141,17 +140,26 @@ def run_rag_evaluation(max_queries: int | None = None) -> pd.DataFrame:
     chunk_overlaps = config["chunk_overlaps"]
     top_k_values = config["top_k_values"]
 
+    provider = config.get("eval_provider", "local")
+    base_url = config.get("eval_base_url", "http://localhost:1234/v1")
+
     judge = LLMJudge(
         model=config["eval_model"],
         temperature=config["judge_temperature"],
+        provider=provider,
+        base_url=base_url,
     )
     relevance_judge = RetrievalRelevanceJudge(
         model=config["eval_model"],
         temperature=config["judge_temperature"],
+        provider=provider,
+        base_url=base_url,
     )
-    response_llm = ChatGoogleGenerativeAI(
+    response_llm = _create_llm(
         model=config["eval_model"],
         temperature=0.3,
+        provider=provider,
+        base_url=base_url,
     )
 
     # Step 1: Build vector stores for each unique (chunk_size, chunk_overlap) pair
@@ -169,17 +177,34 @@ def run_rag_evaluation(max_queries: int | None = None) -> pd.DataFrame:
     print(f"Total evaluations: {len(chunking_configs) * len(top_k_values) * len(queries)}")
     print(f"{'='*60}\n")
 
+    # Check which collections already exist in pgvector
+    existing_collections = set()
+    try:
+        import psycopg
+        conn = psycopg.connect(settings.DATABASE_URL.replace("+psycopg", ""))
+        cur = conn.execute("SELECT name FROM langchain_pg_collection")
+        existing_collections = {row[0] for row in cur.fetchall()}
+        conn.close()
+    except Exception:
+        pass
+
     for chunk_size, chunk_overlap in tqdm(chunking_configs, desc="Building indexes"):
         if chunk_overlap >= chunk_size:
             print(f"  Skipping overlap={chunk_overlap} >= chunk_size={chunk_size}")
             continue
 
         collection = f"eval_cs{chunk_size}_co{chunk_overlap}"
-        print(f"  Building: chunk_size={chunk_size}, overlap={chunk_overlap} -> {collection}")
-        build_vectorstore_for_config(chunk_size, chunk_overlap, collection)
+        if collection in existing_collections:
+            print(f"  Reusing existing: {collection}")
+        else:
+            print(f"  Building: chunk_size={chunk_size}, overlap={chunk_overlap} -> {collection}")
+            max_samples = config.get("max_dataset_samples")
+            build_vectorstore_for_config(chunk_size, chunk_overlap, collection, max_samples)
         built_collections[(chunk_size, chunk_overlap)] = collection
 
     # Step 2: Evaluate each (chunk_size, chunk_overlap, top_k) combination
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = RESULTS_DIR / "rag_eval_results.csv"
     results = []
     total_combos = len(built_collections) * len(top_k_values)
     combo_idx = 0
@@ -229,6 +254,10 @@ def run_rag_evaluation(max_queries: int | None = None) -> pd.DataFrame:
                         **scores.to_dict(),
                     }
                 )
+
+            # Save incrementally after each config completes
+            pd.DataFrame(results).to_csv(output_path, index=False)
+            print(f"  (incremental save: {len(results)} rows -> {output_path})")
 
     df = pd.DataFrame(results)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

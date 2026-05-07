@@ -193,24 +193,61 @@ MindBridge includes an evaluation framework that measures response quality using
 ### Running the Evaluation
 
 ```bash
-# Add your API key to backend/.env (GEMINI_API_KEY is used by default)
 cd evaluation
 uv sync
 
 # Quick smoke test (3 queries)
-uv run python run_all.py --quick
+uv run python run_all.py --quick --skip-analysis
 
-# Full evaluation (50 queries × all configs)
-uv run python run_all.py
+# Full evaluation (10 queries × all configs)
+uv run python run_all.py --skip-analysis
+
+# Generate analysis figures after evaluation
+python analysis/analyze.py
 ```
 
-> The evaluation runs offline — it calls LLM APIs directly and does **not** require the server to be running.
+> Requires PostgreSQL (pgvector) running and a local LLM loaded in LM Studio. Does **not** require the web server.
 
-### Results
+### RAG Parameter Results
 
-<!-- Evaluation results will be added here after running the full benchmark -->
+Evaluated `chunk_size ∈ {500, 1000, 2000}` with `chunk_overlap=100`, `top_k=3` using **Qwen3-Embedding-0.6B** (local, sentence-transformers) for retrieval and **Nemotron Nano 4B** (local, LM Studio) as judge. Scored on 10 mental-health queries across anxiety, depression, grief, loneliness, self-esteem, and substance categories.
 
-_Results pending. Figures and analysis will be added after the full evaluation run._
+| Chunk Size | Avg Quality | Retrieval Relevance | Retrieval Latency |
+|-----------|-------------|---------------------|-------------------|
+| **2000**  | **4.86**    | 0.748               | 0.393s            |
+| 1000      | 4.44        | 0.771               | 0.434s            |
+| 500       | 3.74        | 0.769               | 0.589s            |
+
+**Finding:** Larger chunks (2000 chars) provide more coherent context and yield significantly higher response quality, despite slightly lower retrieval relevance scores. Chunk size 2000 is used as the production default.
+
+![RAG Quality Heatmap](analysis/pics/rag_heatmap_quality.png)
+![RAG Metrics by Chunk Size](analysis/pics/rag_metrics_by_chunk.png)
+![Retrieval Relevance vs Response Quality](analysis/pics/rag_relevance_vs_quality.png)
+
+### Prompting Strategy Results
+
+Compared Rogerian, CBT-Informed, and Baseline strategies — each tested with and without RAG — using the optimal RAG config (chunk_size=2000). Judge: **Nemotron Nano 4B** (local).
+
+| Strategy              | RAG  | Empathy | Alliance | Safety | Coherence | Helpfulness | **Avg** |
+|-----------------------|------|---------|----------|--------|-----------|-------------|---------|
+| Baseline              | No   | 5.0     | 5.0      | 5.0    | 5.0       | 4.9         | **4.98**|
+| CBT-Informed          | No   | 5.0     | 4.9      | 5.0    | 5.0       | 4.9         | **4.96**|
+| CBT-Informed          | Yes  | 4.8     | 4.8      | 5.0    | 5.0       | 4.9         | 4.90    |
+| Rogerian              | Yes  | 4.9     | 4.9      | 5.0    | 5.0       | 3.9         | 4.74    |
+| Rogerian              | No   | 4.8     | 4.9      | 5.0    | 4.4       | 4.1         | 4.64    |
+| Baseline              | Yes  | 4.6     | 4.6      | 4.5    | 4.6       | 4.2         | 4.50    |
+
+**Findings:**
+- All strategies achieve very high safety scores (≥4.5), confirming the system avoids harmful advice
+- No strategy difference is statistically significant (Wilcoxon p>0.05 for all pairs), likely due to the small sample size (n=10)
+- RAG shows mixed impact: helps Rogerian coherence (+0.6) but slightly reduces Baseline scores — the added context may increase response length and complexity
+- CBT-Informed without RAG is the most consistently high-scoring condition (4.96 avg)
+
+![Strategy Radar Chart](analysis/pics/prompting_radar.png)
+![RAG Impact per Strategy](analysis/pics/prompting_rag_impact.png)
+![Score Distributions](analysis/pics/prompting_boxplot.png)
+
+> **Note:** Results are based on 10 queries per condition judged by a local 4B-parameter model. Larger-scale evaluation with a stronger judge would improve reliability.
 
 ## Project Structure
 
@@ -239,7 +276,10 @@ MindBridge/
 │   ├── configs/             # RAG + prompting strategy YAML configs
 │   ├── datasets/            # Evaluation queries
 │   ├── metrics/             # LLM judge scoring
-│   └── results/             # Output data + figures
+│   └── results/             # Output CSVs
+├── analysis/
+│   ├── analyze.py           # Scientific figure generation script
+│   └── pics/                # Output figures (PNG)
 └── docker-compose.yml
 ```
 

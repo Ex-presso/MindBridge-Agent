@@ -1,0 +1,4 @@
+chunk_size,chunk_overlap,top_k,average,retrieval_relevance,retrieval_time_s,response_time_s,empathy,helpfulness,safety
+500,100,3,3.74,0.769,0.589,23.023,3.8,3.5,3.8
+1000,100,3,4.44,0.771,0.434,24.727,4.6,3.6,4.9
+2000,100,3,4.86,0.748,0.393,20.752,5.0,4.3,5.0

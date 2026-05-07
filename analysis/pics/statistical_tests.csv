@@ -1,0 +1,4 @@
+comparison,W,p,sig
+rogerian vs cbt,9.0,0.117188,ns
+rogerian vs baseline,14.0,0.632812,ns
+cbt vs baseline,4.0,0.375,ns

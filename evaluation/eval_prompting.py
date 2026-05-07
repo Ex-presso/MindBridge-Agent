@@ -31,10 +31,9 @@ sys.path.insert(0, str(EVAL_ROOT))
 from dotenv import load_dotenv
 load_dotenv(ROOT / "backend" / ".env")
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from metrics.judge import LLMJudge
+from metrics.judge import LLMJudge, _create_llm
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +60,14 @@ def get_rag_context(query: str, config: dict) -> list[str]:
     """Retrieve RAG context using the configured parameters."""
     from app.core.rag.vector_store import VectorStore
 
+    cs = config["rag_chunk_size"]
+    co = config["rag_chunk_overlap"]
+    collection = f"eval_cs{cs}_co{co}"
     store = VectorStore(
         backend="pgvector",
-        chunk_size=config["rag_chunk_size"],
-        chunk_overlap=config["rag_chunk_overlap"],
+        chunk_size=cs,
+        chunk_overlap=co,
+        collection_name=collection,
     )
     store.load()
     retriever = store.get_retriever(k=config["rag_top_k"])
@@ -77,7 +80,7 @@ def generate_response(
     system_prompt: str,
     augmentation: str,
     rag_docs: list[str] | None,
-    llm: ChatGoogleGenerativeAI,
+    llm,
 ) -> str:
     """Generate a response using a specific strategy."""
     full_system = system_prompt
@@ -110,13 +113,20 @@ def run_prompting_evaluation(max_queries: int | None = None) -> pd.DataFrame:
     queries = load_queries(max_queries or config.get("num_eval_queries", 50))
     strategies = config["strategies"]
 
+    provider = config.get("eval_provider", "local")
+    base_url = config.get("eval_base_url", "http://localhost:1234/v1")
+
     judge = LLMJudge(
         model=config["eval_model"],
         temperature=config["judge_temperature"],
+        provider=provider,
+        base_url=base_url,
     )
-    response_llm = ChatGoogleGenerativeAI(
+    response_llm = _create_llm(
         model=config["eval_model"],
         temperature=0.3,
+        provider=provider,
+        base_url=base_url,
     )
 
     # Determine conditions
@@ -139,6 +149,8 @@ def run_prompting_evaluation(max_queries: int | None = None) -> pd.DataFrame:
     print(f"{'='*60}\n")
 
     results = []
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = RESULTS_DIR / "prompting_eval_results.csv"
 
     for cond_idx, (strategy_key, strategy, use_rag) in enumerate(conditions, 1):
         rag_label = "with_rag" if use_rag else "no_rag"
@@ -182,9 +194,11 @@ def run_prompting_evaluation(max_queries: int | None = None) -> pd.DataFrame:
                 }
             )
 
+        # Save incrementally after each condition completes
+        pd.DataFrame(results).to_csv(output_path, index=False)
+        print(f"  (incremental save: {len(results)} rows -> {output_path})")
+
     df = pd.DataFrame(results)
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = RESULTS_DIR / "prompting_eval_results.csv"
     df.to_csv(output_path, index=False)
     print(f"\nResults saved to {output_path}")
 

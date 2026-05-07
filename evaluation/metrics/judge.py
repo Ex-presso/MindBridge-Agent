@@ -7,7 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -77,19 +77,59 @@ class JudgeScores:
         }
 
 
+def _create_llm(
+    model: str,
+    temperature: float,
+    provider: str = "local",
+    base_url: str = "http://localhost:1234/v1",
+    api_key: str | None = None,
+) -> BaseChatModel:
+    """Create a chat model for evaluation."""
+    if provider == "local":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=model,
+            temperature=temperature,
+            base_url=base_url,
+            api_key=api_key or "lm-studio",
+            max_tokens=1024,
+        )
+    elif provider == "google_genai":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        kwargs = {"model": model, "temperature": temperature}
+        if api_key:
+            kwargs["api_key"] = api_key
+        return ChatGoogleGenerativeAI(**kwargs)
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+
+def _parse_json_response(content: str) -> dict:
+    """Extract JSON from LLM response, handling markdown fences and extra text."""
+    content = content.strip()
+    content = re.sub(r"^```(?:json)?\s*", "", content)
+    content = re.sub(r"\s*```$", "", content)
+    # Try to find JSON object in the response
+    match = re.search(r"\{[^{}]*\}", content)
+    if match:
+        return json.loads(match.group())
+    return json.loads(content)
+
+
 class LLMJudge:
     """Uses an LLM to score therapy response quality."""
 
     def __init__(
         self,
-        model: str = "gemini-2.5-flash",
+        model: str = "nvidia/nemotron-3-nano-4b",
         temperature: float = 0.1,
+        provider: str = "local",
+        base_url: str = "http://localhost:1234/v1",
         api_key: str | None = None,
     ):
-        kwargs = {"model": model, "temperature": temperature}
-        if api_key:
-            kwargs["api_key"] = api_key
-        self.llm = ChatGoogleGenerativeAI(**kwargs)
+        self.llm = _create_llm(model, temperature, provider, base_url, api_key)
 
     def score(self, query: str, response: str) -> JudgeScores:
         prompt = (
@@ -101,15 +141,10 @@ class LLMJudge:
         result = self.llm.invoke(prompt)
         content = result.content.strip()
 
-        # Strip markdown code fences if present
-        content = re.sub(r"^```(?:json)?\s*", "", content)
-        content = re.sub(r"\s*```$", "", content)
-
         try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            logger.error("Judge returned invalid JSON: %s", content)
-            # Return neutral scores on parse failure
+            data = _parse_json_response(content)
+        except (json.JSONDecodeError, TypeError):
+            logger.error("Judge returned invalid JSON: %s", content[:200])
             return JudgeScores(
                 empathy=3,
                 therapeutic_alliance=3,
@@ -132,14 +167,13 @@ class RetrievalRelevanceJudge:
 
     def __init__(
         self,
-        model: str = "gemini-2.5-flash",
+        model: str = "nvidia/nemotron-3-nano-4b",
         temperature: float = 0.1,
+        provider: str = "local",
+        base_url: str = "http://localhost:1234/v1",
         api_key: str | None = None,
     ):
-        kwargs = {"model": model, "temperature": temperature}
-        if api_key:
-            kwargs["api_key"] = api_key
-        self.llm = ChatGoogleGenerativeAI(**kwargs)
+        self.llm = _create_llm(model, temperature, provider, base_url, api_key)
 
     def score(self, query: str, documents: list[str]) -> float:
         """Score average relevance of retrieved documents (0-1 scale)."""
@@ -161,13 +195,11 @@ class RetrievalRelevanceJudge:
 
         result = self.llm.invoke(prompt)
         content = result.content.strip()
-        content = re.sub(r"^```(?:json)?\s*", "", content)
-        content = re.sub(r"\s*```$", "", content)
 
         try:
-            data = json.loads(content)
+            data = _parse_json_response(content)
             scores = data.get("scores", [])
             return sum(scores) / len(scores) if scores else 0.0
         except (json.JSONDecodeError, TypeError):
-            logger.error("Relevance judge returned invalid JSON: %s", content)
+            logger.error("Relevance judge returned invalid JSON: %s", content[:200])
             return 0.5

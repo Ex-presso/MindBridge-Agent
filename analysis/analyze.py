@@ -1,0 +1,424 @@
+"""
+MindBridge Evaluation Analysis — Scientific Figures.
+
+Reads evaluation results from evaluation/results/ and generates
+publication-quality figures in analysis/pics/.
+
+Usage:
+    cd MindBridge/
+    python analysis/analyze.py
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from scipy import stats
+
+ROOT = Path(__file__).resolve().parent.parent
+RESULTS_DIR = ROOT / "evaluation" / "results"
+PICS_DIR = Path(__file__).resolve().parent / "pics"
+
+# ── Publication-quality matplotlib defaults ─────────────────────────
+plt.rcParams.update(
+    {
+        "font.family": "serif",
+        "font.size": 11,
+        "axes.titlesize": 13,
+        "axes.labelsize": 12,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 10,
+        "figure.dpi": 200,
+        "savefig.dpi": 200,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.15,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+    }
+)
+
+PALETTE = sns.color_palette("Set2", 8)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RAG Parameter Evaluation Figures
+# ═══════════════════════════════════════════════════════════════════
+
+
+def fig_rag_heatmap(df: pd.DataFrame) -> None:
+    """Fig 1 — Heatmap: chunk_size × top_k → mean quality score."""
+    pivot = df.groupby(["chunk_size", "top_k"])["average"].mean().unstack()
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    sns.heatmap(
+        pivot,
+        annot=True,
+        fmt=".2f",
+        cmap="YlOrRd",
+        ax=ax,
+        vmin=pivot.values.min() - 0.3,
+        vmax=pivot.values.max() + 0.3,
+        linewidths=0.8,
+        linecolor="white",
+        cbar_kws={"label": "Avg Quality Score (1–5)"},
+    )
+    ax.set_title("Response Quality: Chunk Size × Top-K")
+    ax.set_xlabel("Top-K Retrieved Documents")
+    ax.set_ylabel("Chunk Size (characters)")
+    fig.savefig(PICS_DIR / "rag_heatmap_quality.png")
+    plt.close()
+    print("  ✓ rag_heatmap_quality.png")
+
+
+def fig_rag_metrics_bar(df: pd.DataFrame) -> None:
+    """Fig 2 — Grouped bar chart: per-metric scores across chunk sizes."""
+    metrics = ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+    grouped = df.groupby("chunk_size")[metrics].mean()
+
+    x = np.arange(len(metrics))
+    width = 0.22
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    for i, (cs, row) in enumerate(grouped.iterrows()):
+        offset = (i - len(grouped) / 2 + 0.5) * width
+        bars = ax.bar(x + offset, row.values, width, label=f"chunk={cs}", color=PALETTE[i])
+        for bar in bars:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.03,
+                f"{bar.get_height():.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([m.replace("_", "\n") for m in metrics])
+    ax.set_ylabel("Mean Score (1–5)")
+    ax.set_title("Quality Metrics by Chunk Size")
+    ax.set_ylim(0, 5.5)
+    ax.legend(title="Chunk Size")
+    ax.grid(axis="y", alpha=0.25)
+    fig.savefig(PICS_DIR / "rag_metrics_by_chunk.png")
+    plt.close()
+    print("  ✓ rag_metrics_by_chunk.png")
+
+
+def fig_rag_topk_tradeoff(df: pd.DataFrame) -> None:
+    """Fig 3 — Dual-axis line: quality vs retrieval latency by top_k."""
+    by_k = df.groupby("top_k").agg(
+        avg_score=("average", "mean"),
+        avg_retrieval=("retrieval_time_s", "mean"),
+        avg_response=("response_time_s", "mean"),
+    )
+
+    fig, ax1 = plt.subplots(figsize=(7, 4.5))
+    c1, c2 = "#2196F3", "#E91E63"
+
+    ax1.plot(by_k.index, by_k["avg_score"], "o-", color=c1, lw=2, ms=8, label="Avg Quality")
+    ax1.set_xlabel("Top-K")
+    ax1.set_ylabel("Quality Score (1–5)", color=c1)
+    ax1.tick_params(axis="y", labelcolor=c1)
+    ax1.set_ylim(
+        max(1, by_k["avg_score"].min() - 0.5),
+        min(5, by_k["avg_score"].max() + 0.5),
+    )
+
+    ax2 = ax1.twinx()
+    ax2.plot(by_k.index, by_k["avg_retrieval"], "s--", color=c2, lw=2, ms=8, label="Retrieval Time")
+    ax2.set_ylabel("Retrieval Latency (s)", color=c2)
+    ax2.tick_params(axis="y", labelcolor=c2)
+
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper left")
+    ax1.set_title("Quality vs Latency Trade-off by Top-K")
+    ax1.grid(True, alpha=0.2)
+    fig.savefig(PICS_DIR / "rag_topk_tradeoff.png")
+    plt.close()
+    print("  ✓ rag_topk_tradeoff.png")
+
+
+def fig_rag_relevance_violin(df: pd.DataFrame) -> None:
+    """Fig 4 — Violin plot: retrieval relevance distribution by chunk size."""
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    sns.violinplot(
+        data=df,
+        x="chunk_size",
+        y="retrieval_relevance",
+        palette=PALETTE[:3],
+        inner="box",
+        ax=ax,
+    )
+    ax.set_xlabel("Chunk Size (characters)")
+    ax.set_ylabel("Retrieval Relevance (0–1)")
+    ax.set_title("Retrieval Relevance Distribution by Chunk Size")
+    ax.set_ylim(-0.05, 1.05)
+    ax.grid(axis="y", alpha=0.2)
+    fig.savefig(PICS_DIR / "rag_relevance_violin.png")
+    plt.close()
+    print("  ✓ rag_relevance_violin.png")
+
+
+def fig_rag_composite(df: pd.DataFrame) -> None:
+    """Fig 5 — Scatter: retrieval_relevance vs avg quality, sized by top_k."""
+    agg = df.groupby(["chunk_size", "top_k"]).agg(
+        relevance=("retrieval_relevance", "mean"),
+        quality=("average", "mean"),
+    ).reset_index()
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    for i, cs in enumerate(sorted(agg["chunk_size"].unique())):
+        sub = agg[agg["chunk_size"] == cs]
+        ax.scatter(
+            sub["relevance"],
+            sub["quality"],
+            s=sub["top_k"] * 60,
+            color=PALETTE[i],
+            label=f"chunk={cs}",
+            edgecolors="white",
+            linewidth=0.8,
+            alpha=0.85,
+        )
+        for _, row in sub.iterrows():
+            ax.annotate(
+                f"k={int(row['top_k'])}",
+                (row["relevance"], row["quality"]),
+                fontsize=8,
+                ha="center",
+                va="bottom",
+                xytext=(0, 6),
+                textcoords="offset points",
+            )
+
+    ax.set_xlabel("Mean Retrieval Relevance (0–1)")
+    ax.set_ylabel("Mean Quality Score (1–5)")
+    ax.set_title("Retrieval Relevance vs Response Quality")
+    ax.legend(title="Chunk Size")
+    ax.grid(True, alpha=0.2)
+    fig.savefig(PICS_DIR / "rag_relevance_vs_quality.png")
+    plt.close()
+    print("  ✓ rag_relevance_vs_quality.png")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Prompting Strategy Evaluation Figures
+# ═══════════════════════════════════════════════════════════════════
+
+
+def fig_prompting_radar(df: pd.DataFrame) -> None:
+    """Fig 6 — Radar chart: per-strategy metric comparison."""
+    metrics = ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+    summary = df.groupby("condition")[metrics].mean()
+
+    angles = np.linspace(0, 2 * np.pi, len(metrics), endpoint=False).tolist()
+    angles += angles[:1]
+
+    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+    for idx, (cond, vals) in enumerate(summary.iterrows()):
+        v = vals.tolist() + vals.tolist()[:1]
+        ax.plot(angles, v, "o-", lw=2, label=cond, color=PALETTE[idx])
+        ax.fill(angles, v, alpha=0.08, color=PALETTE[idx])
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels([m.replace("_", "\n") for m in metrics], fontsize=10)
+    ax.set_ylim(0, 5)
+    ax.set_title("Prompting Strategy Comparison", y=1.08, fontsize=14)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.1), fontsize=9)
+    fig.savefig(PICS_DIR / "prompting_radar.png")
+    plt.close()
+    print("  ✓ prompting_radar.png")
+
+
+def fig_prompting_rag_impact(df: pd.DataFrame) -> None:
+    """Fig 7 — Grouped bar: RAG impact per strategy."""
+    rag_impact = df.groupby(["strategy_name", "use_rag"])["average"].mean().unstack()
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    x = np.arange(len(rag_impact.index))
+    w = 0.32
+
+    bars_no = ax.bar(x - w / 2, rag_impact[False], w, label="Without RAG", color=PALETTE[3])
+    bars_rag = ax.bar(x + w / 2, rag_impact[True], w, label="With RAG", color=PALETTE[0])
+
+    for bars in [bars_no, bars_rag]:
+        for bar in bars:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.04,
+                f"{bar.get_height():.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(rag_impact.index, rotation=10)
+    ax.set_ylabel("Average Score (1–5)")
+    ax.set_title("RAG Impact on Prompting Strategies")
+    ax.set_ylim(0, 5.5)
+    ax.legend()
+    ax.grid(axis="y", alpha=0.2)
+    fig.savefig(PICS_DIR / "prompting_rag_impact.png")
+    plt.close()
+    print("  ✓ prompting_rag_impact.png")
+
+
+def fig_prompting_boxplot(df: pd.DataFrame) -> None:
+    """Fig 8 — Box plot: score distributions across strategies."""
+    metrics = ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+    melted = df.melt(
+        id_vars=["condition", "strategy_name", "use_rag"],
+        value_vars=metrics,
+        var_name="Metric",
+        value_name="Score",
+    )
+
+    fig, ax = plt.subplots(figsize=(12, 5.5))
+    sns.boxplot(
+        data=melted,
+        x="Metric",
+        y="Score",
+        hue="condition",
+        palette=PALETTE,
+        ax=ax,
+        fliersize=3,
+    )
+    ax.set_xticklabels([m.replace("_", "\n") for m in metrics])
+    ax.set_title("Score Distributions by Strategy × RAG Condition")
+    ax.set_ylabel("Score (1–5)")
+    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
+    ax.grid(axis="y", alpha=0.2)
+    fig.savefig(PICS_DIR / "prompting_boxplot.png")
+    plt.close()
+    print("  ✓ prompting_boxplot.png")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Summary Tables
+# ═══════════════════════════════════════════════════════════════════
+
+
+def generate_summary_tables(rag_df: pd.DataFrame | None, prompt_df: pd.DataFrame | None) -> dict:
+    """Generate summary statistics and return them for README embedding."""
+    tables = {}
+
+    if rag_df is not None:
+        # Best RAG config
+        rag_summary = (
+            rag_df.groupby(["chunk_size", "chunk_overlap", "top_k"])
+            .agg(
+                avg_quality=("average", "mean"),
+                avg_relevance=("retrieval_relevance", "mean"),
+                avg_retrieval_time=("retrieval_time_s", "mean"),
+            )
+            .round(3)
+            .sort_values("avg_quality", ascending=False)
+        )
+        rag_summary.to_csv(PICS_DIR / "rag_summary_table.csv")
+        tables["rag"] = rag_summary
+        print("\n  RAG Summary (top 5 configs by quality):")
+        print(rag_summary.head().to_string())
+
+    if prompt_df is not None:
+        # Prompting summary
+        prompt_summary = (
+            prompt_df.groupby(["strategy_name", "use_rag"])
+            .agg(
+                empathy=("empathy", "mean"),
+                alliance=("therapeutic_alliance", "mean"),
+                safety=("safety", "mean"),
+                coherence=("coherence", "mean"),
+                helpfulness=("helpfulness", "mean"),
+                avg_quality=("average", "mean"),
+            )
+            .round(3)
+        )
+        prompt_summary.to_csv(PICS_DIR / "prompting_summary_table.csv")
+        tables["prompting"] = prompt_summary
+        print("\n  Prompting Summary:")
+        print(prompt_summary.to_string())
+
+        # Statistical tests
+        if "strategy" in prompt_df.columns:
+            strategies = prompt_df["strategy"].unique()
+            sig_rows = []
+            for i in range(len(strategies)):
+                for j in range(i + 1, len(strategies)):
+                    s1, s2 = strategies[i], strategies[j]
+                    a = prompt_df[(prompt_df["strategy"] == s1) & (prompt_df["use_rag"])]["average"].values
+                    b = prompt_df[(prompt_df["strategy"] == s2) & (prompt_df["use_rag"])]["average"].values
+                    if len(a) == len(b) and len(a) > 0:
+                        try:
+                            stat, p = stats.wilcoxon(a, b)
+                            sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+                            sig_rows.append({"comparison": f"{s1} vs {s2}", "W": round(stat, 2), "p": round(p, 6), "sig": sig})
+                        except ValueError:
+                            pass
+            if sig_rows:
+                sig_df = pd.DataFrame(sig_rows)
+                sig_df.to_csv(PICS_DIR / "statistical_tests.csv", index=False)
+                tables["significance"] = sig_df
+                print("\n  Statistical Tests:")
+                print(sig_df.to_string(index=False))
+
+    return tables
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════
+
+
+def main():
+    PICS_DIR.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 60)
+    print("MindBridge Evaluation Analysis")
+    print("=" * 60)
+
+    rag_df = None
+    prompt_df = None
+
+    # ── RAG results ──
+    rag_csv = RESULTS_DIR / "rag_eval_results.csv"
+    if rag_csv.exists():
+        print("\n── RAG Parameter Analysis ──")
+        rag_df = pd.read_csv(rag_csv)
+        print(f"  Loaded {len(rag_df)} RAG evaluation records")
+        fig_rag_heatmap(rag_df)
+        fig_rag_metrics_bar(rag_df)
+        fig_rag_topk_tradeoff(rag_df)
+        fig_rag_relevance_violin(rag_df)
+        fig_rag_composite(rag_df)
+    else:
+        print(f"\n  ⚠ No RAG results at {rag_csv}")
+
+    # ── Prompting results ──
+    prompt_csv = RESULTS_DIR / "prompting_eval_results.csv"
+    if prompt_csv.exists():
+        print("\n── Prompting Strategy Analysis ──")
+        prompt_df = pd.read_csv(prompt_csv)
+        print(f"  Loaded {len(prompt_df)} prompting evaluation records")
+        fig_prompting_radar(prompt_df)
+        fig_prompting_rag_impact(prompt_df)
+        fig_prompting_boxplot(prompt_df)
+    else:
+        print(f"\n  ⚠ No prompting results at {prompt_csv}")
+
+    # ── Summary tables ──
+    print("\n── Summary Tables ──")
+    generate_summary_tables(rag_df, prompt_df)
+
+    print(f"\nAll figures saved to: {PICS_DIR}")
+    print("Done!")
+
+
+if __name__ == "__main__":
+    main()
