@@ -1,0 +1,27 @@
+# Retrieval IR benchmark configuration.
+#
+# Sweeps (chunk_size × chunk_overlap) configurations and reports
+# Recall@k / Hit@k / MRR / NDCG@k / MAP at multiple top_k values.
+# Gold relevance comes from `ir_benchmark.json` (cluster gold per source example).
+
+# Embedding provider and model are read from backend/.env
+# (settings.EMBEDDING_PROVIDER / EMBEDDING_MODEL). Default in this repo:
+# sentence_transformers + Qwen/Qwen3-Embedding-0.6B.
+
+dataset: "ShenLab/MentalChat16K"
+
+# Must match the pool_size used by build_ir_benchmark.py — eval indexes
+# include all examples in this range so the gold examples are retrievable.
+max_dataset_samples: 3000
+
+# Sweep grid
+chunk_sizes: [500, 1000, 2000]
+chunk_overlaps: [50, 100, 200]
+top_k_eval: [1, 3, 5, 10]
+
+# Collection naming: collections built for IR eval are namespaced
+# `ir_eval_cs{cs}_co{co}` so they don't conflict with other eval runs.
+collection_prefix: "ir_eval"
+
+# Path to the curated benchmark
+benchmark_path: "datasets/ir_benchmark.json"

@@ -208,6 +208,136 @@ def fig_rag_composite(df: pd.DataFrame) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Retrieval IR Benchmark Figures
+# ═══════════════════════════════════════════════════════════════════
+
+
+def fig_ir_heatmap_ndcg5(df: pd.DataFrame) -> None:
+    """Heatmap: chunk_size × chunk_overlap → mean NDCG@5."""
+    sub = df[df["top_k"] == 5]
+    if sub.empty:
+        print("  ⚠ no top_k=5 rows; skipping ir_heatmap_ndcg5")
+        return
+    pivot = sub.groupby(["chunk_size", "chunk_overlap"])["ndcg_at_k"].mean().unstack()
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    sns.heatmap(
+        pivot,
+        annot=True,
+        fmt=".3f",
+        cmap="YlGnBu",
+        ax=ax,
+        linewidths=0.8,
+        linecolor="white",
+        cbar_kws={"label": "NDCG@5"},
+    )
+    ax.set_title("Retrieval Quality (NDCG@5): Chunk Size × Overlap")
+    ax.set_xlabel("Chunk Overlap")
+    ax.set_ylabel("Chunk Size")
+    fig.savefig(PICS_DIR / "ir_heatmap_ndcg5.png")
+    plt.close()
+    print("  ✓ ir_heatmap_ndcg5.png")
+
+
+def fig_ir_recall_curve(df: pd.DataFrame) -> None:
+    """Recall@k curve per (chunk_size, chunk_overlap) config."""
+    grouped = df.groupby(["chunk_size", "chunk_overlap", "top_k"])["recall_at_k"].mean().reset_index()
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    configs = sorted(grouped.groupby(["chunk_size", "chunk_overlap"]).groups.keys())
+    for i, (cs, co) in enumerate(configs):
+        sub = grouped[(grouped["chunk_size"] == cs) & (grouped["chunk_overlap"] == co)].sort_values("top_k")
+        ax.plot(sub["top_k"], sub["recall_at_k"], "o-", lw=1.8, ms=6,
+                label=f"cs={cs}, co={co}", color=PALETTE[i % len(PALETTE)])
+
+    ax.set_xlabel("Top-K")
+    ax.set_ylabel("Recall@K")
+    ax.set_title("Retrieval Recall vs Top-K")
+    ax.set_xticks(sorted(df["top_k"].unique()))
+    ax.legend(fontsize=8, ncol=2, loc="lower right")
+    ax.grid(True, alpha=0.25)
+    ax.set_ylim(-0.02, 1.02)
+    fig.savefig(PICS_DIR / "ir_recall_curve.png")
+    plt.close()
+    print("  ✓ ir_recall_curve.png")
+
+
+def fig_ir_metrics_bars(df: pd.DataFrame) -> None:
+    """Grouped bars at top_k=5: hit@5, recall@5, ndcg@5, mrr, map per config."""
+    sub = df[df["top_k"] == 5]
+    if sub.empty:
+        print("  ⚠ no top_k=5 rows; skipping ir_metrics_bars")
+        return
+    metrics = ["hit_at_k", "recall_at_k", "ndcg_at_k", "mrr_at_k", "ap_at_k"]
+    pretty = {"hit_at_k": "Hit@5", "recall_at_k": "Recall@5",
+              "ndcg_at_k": "NDCG@5", "mrr_at_k": "MRR@5", "ap_at_k": "AP@5"}
+    grouped = sub.groupby(["chunk_size", "chunk_overlap"])[metrics].mean()
+    grouped.index = [f"cs={cs}\nco={co}" for cs, co in grouped.index]
+
+    x = np.arange(len(metrics))
+    width = 0.85 / len(grouped)
+    fig, ax = plt.subplots(figsize=(11, 5))
+    for i, (cfg, row) in enumerate(grouped.iterrows()):
+        offset = (i - len(grouped) / 2 + 0.5) * width
+        bars = ax.bar(x + offset, row.values, width, label=cfg, color=PALETTE[i % len(PALETTE)])
+        for bar in bars:
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.012,
+                    f"{bar.get_height():.2f}", ha="center", va="bottom", fontsize=7)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([pretty[m] for m in metrics])
+    ax.set_ylabel("Score")
+    ax.set_title("IR Metrics @ K=5 by Chunking Configuration")
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=8, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.08))
+    ax.grid(axis="y", alpha=0.25)
+    fig.savefig(PICS_DIR / "ir_metrics_bars.png", bbox_inches="tight")
+    plt.close()
+    print("  ✓ ir_metrics_bars.png")
+
+
+def fig_ir_query_distribution(df: pd.DataFrame) -> None:
+    """Violin: per-query NDCG@5 distribution across chunk_size (overlap=median)."""
+    sub = df[df["top_k"] == 5].copy()
+    if sub.empty:
+        print("  ⚠ no top_k=5 rows; skipping ir_query_distribution")
+        return
+    sub["config"] = sub.apply(lambda r: f"cs={int(r['chunk_size'])}\nco={int(r['chunk_overlap'])}", axis=1)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.violinplot(data=sub, x="config", y="ndcg_at_k", inner="box",
+                   palette=PALETTE[: sub["config"].nunique()], ax=ax)
+    ax.set_title("Per-Query NDCG@5 Distribution")
+    ax.set_ylabel("NDCG@5")
+    ax.set_xlabel("Configuration")
+    ax.set_ylim(-0.05, 1.05)
+    ax.grid(axis="y", alpha=0.25)
+    fig.savefig(PICS_DIR / "ir_query_distribution.png")
+    plt.close()
+    print("  ✓ ir_query_distribution.png")
+
+
+def generate_ir_summary_table(df: pd.DataFrame) -> pd.DataFrame:
+    summary = (
+        df.groupby(["chunk_size", "chunk_overlap", "top_k"])
+        .agg(
+            recall_at_k=("recall_at_k", "mean"),
+            hit_at_k=("hit_at_k", "mean"),
+            ndcg_at_k=("ndcg_at_k", "mean"),
+            mrr_at_k=("mrr_at_k", "mean"),
+            map_at_k=("ap_at_k", "mean"),
+            retrieval_time_s=("retrieval_time_s", "mean"),
+        )
+        .round(4)
+    )
+    summary.to_csv(PICS_DIR / "ir_summary_table.csv")
+    print("\n  IR Summary @ k=5 (top 5 by NDCG):")
+    if 5 in df["top_k"].unique():
+        print(summary.xs(5, level="top_k").sort_values("ndcg_at_k", ascending=False).head().to_string())
+    return summary
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Prompting Strategy Evaluation Figures
 # ═══════════════════════════════════════════════════════════════════
 
@@ -399,6 +529,20 @@ def main():
         fig_rag_composite(rag_df)
     else:
         print(f"\n  ⚠ No RAG results at {rag_csv}")
+
+    # ── Retrieval IR results ──
+    ir_csv = RESULTS_DIR / "retrieval_eval_results.csv"
+    if ir_csv.exists():
+        print("\n── Retrieval IR Analysis ──")
+        ir_df = pd.read_csv(ir_csv)
+        print(f"  Loaded {len(ir_df)} retrieval evaluation records")
+        fig_ir_heatmap_ndcg5(ir_df)
+        fig_ir_recall_curve(ir_df)
+        fig_ir_metrics_bars(ir_df)
+        fig_ir_query_distribution(ir_df)
+        generate_ir_summary_table(ir_df)
+    else:
+        print(f"\n  ⚠ No retrieval IR results at {ir_csv}")
 
     # ── Prompting results ──
     prompt_csv = RESULTS_DIR / "prompting_eval_results.csv"

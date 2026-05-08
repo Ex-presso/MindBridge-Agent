@@ -93,11 +93,11 @@ class VectorStore:
         assert self.ds is not None, "Dataset not loaded"
         docs: list[Document] = []
 
-        for ex in tqdm(self.ds["train"], desc="Building chunks"):
+        for example_idx, ex in enumerate(tqdm(self.ds["train"], desc="Building chunks")):
             assistant_output: str = ex.get("output", "") or ""
             chunks = self.text_splitter.split_text(assistant_output)
 
-            for chunk in chunks:
+            for chunk_idx, chunk in enumerate(chunks):
                 docs.append(
                     Document(
                         page_content=chunk,
@@ -105,6 +105,8 @@ class VectorStore:
                             "source": "MentalChat16K",
                             "chunk_size": self.chunk_size,
                             "chunk_overlap": self.chunk_overlap,
+                            "source_example_idx": example_idx,
+                            "chunk_idx": chunk_idx,
                         },
                     )
                 )
@@ -122,20 +124,42 @@ class VectorStore:
             use_jsonb=True,
         )
 
-    def build_pgvector(self) -> Any:
+    def build_pgvector(self, batch_size: int = 1000) -> Any:
+        """Build the pgvector index, inserting in batches.
+
+        PostgreSQL caps a single statement at 65,535 bind parameters; PGVector
+        binds 4 per row, so single-shot inserts fail past ~16k chunks. Batched
+        adds keep us well under that for any chunking configuration.
+        """
         self.load_documents()
         docs = self._example_to_documents()
 
         from langchain_postgres import PGVector
 
-        self.vectorstore = PGVector.from_documents(
-            documents=docs,
-            embedding=self.embedding,
+        self.vectorstore = PGVector(
+            embeddings=self.embedding,
             collection_name=self.collection_name,
             connection=settings.DATABASE_URL,
             use_jsonb=True,
             pre_delete_collection=True,
         )
+
+        try:
+            for i in tqdm(
+                range(0, len(docs), batch_size),
+                desc="Inserting chunks",
+                unit="batch",
+            ):
+                self.vectorstore.add_documents(docs[i : i + batch_size])
+        except Exception:
+            # Drop the partial collection so a re-run sees it as missing
+            # rather than caching half-populated state.
+            try:
+                self.vectorstore.delete_collection()
+            except Exception:
+                pass
+            raise
+
         return self.vectorstore
 
     def load_pgvector(self) -> Any:
