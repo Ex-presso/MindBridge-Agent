@@ -338,6 +338,87 @@ def generate_ir_summary_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Agent Routing Benchmark Figures
+# ═══════════════════════════════════════════════════════════════════
+
+
+def fig_routing_confusion(df: pd.DataFrame) -> None:
+    """2x2 confusion matrix: should_call (gold) × called (predicted)."""
+    scored = df[df["should_call_rag"].isin([True, False])]
+    cm = pd.crosstab(
+        scored["should_call_rag"].map({True: "should call", False: "should not"}),
+        scored["called_target_tool"].map({True: "called", False: "did not"}),
+    ).reindex(index=["should call", "should not"], columns=["called", "did not"], fill_value=0)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax,
+                linewidths=1.0, linecolor="white",
+                annot_kws={"fontsize": 14, "fontweight": "bold"})
+    ax.set_title(f"Routing Confusion (n={len(scored)})")
+    ax.set_xlabel("Agent Decision")
+    ax.set_ylabel("Ground Truth")
+    fig.savefig(PICS_DIR / "routing_confusion.png")
+    plt.close()
+    print("  ✓ routing_confusion.png")
+
+
+def fig_routing_by_category(df: pd.DataFrame) -> None:
+    """Per-category: should_call rate vs did_call rate."""
+    scored = df[df["should_call_rag"].isin([True, False])]
+    grp = (
+        scored.groupby("category")
+        .agg(should_call=("should_call_rag", "mean"),
+             did_call=("called_target_tool", "mean"),
+             n=("query_id", "count"))
+        .sort_values("should_call", ascending=False)
+    )
+
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    x = np.arange(len(grp))
+    width = 0.4
+    ax.bar(x - width / 2, grp["should_call"], width, label="Should call", color=PALETTE[0])
+    ax.bar(x + width / 2, grp["did_call"], width, label="Did call", color=PALETTE[1])
+
+    for i, n in enumerate(grp["n"]):
+        ax.text(i, max(grp["should_call"].iloc[i], grp["did_call"].iloc[i]) + 0.04,
+                f"n={n}", ha="center", fontsize=8, color="#666")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(grp.index, rotation=30, ha="right")
+    ax.set_ylabel("Rate")
+    ax.set_ylim(0, 1.18)
+    ax.set_title("RAG-Tool Invocation by Query Category")
+    ax.legend(loc="upper right")
+    ax.grid(axis="y", alpha=0.25)
+    ax.axhline(y=0.5, color="gray", linestyle=":", alpha=0.4)
+    fig.savefig(PICS_DIR / "routing_by_category.png")
+    plt.close()
+    print("  ✓ routing_by_category.png")
+
+
+def fig_routing_metrics_bar(summary: pd.DataFrame) -> None:
+    """Single-bar summary of P/R/F1/Accuracy."""
+    if len(summary) == 0:
+        return
+    row = summary.iloc[0]
+    metrics = ["precision", "recall", "f1", "accuracy"]
+    vals = [row[m] for m in metrics]
+
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    bars = ax.bar(metrics, vals, color=PALETTE[: len(metrics)])
+    for b, v in zip(bars, vals):
+        ax.text(b.get_x() + b.get_width() / 2, v + 0.015, f"{v:.3f}",
+                ha="center", fontsize=11, fontweight="bold")
+    ax.set_ylim(0, 1.08)
+    ax.set_ylabel("Score")
+    ax.set_title(f"Agent Routing Metrics (n={int(row['n_scored'])})")
+    ax.grid(axis="y", alpha=0.25)
+    fig.savefig(PICS_DIR / "routing_metrics.png")
+    plt.close()
+    print("  ✓ routing_metrics.png")
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Prompting Strategy Evaluation Figures
 # ═══════════════════════════════════════════════════════════════════
 
@@ -543,6 +624,20 @@ def main():
         generate_ir_summary_table(ir_df)
     else:
         print(f"\n  ⚠ No retrieval IR results at {ir_csv}")
+
+    # ── Routing results ──
+    routing_csv = RESULTS_DIR / "routing_eval_results.csv"
+    routing_summary_csv = RESULTS_DIR / "routing_eval_summary.csv"
+    if routing_csv.exists() and routing_summary_csv.exists():
+        print("\n── Agent Routing Analysis ──")
+        routing_df = pd.read_csv(routing_csv)
+        routing_summary = pd.read_csv(routing_summary_csv)
+        print(f"  Loaded {len(routing_df)} routing decisions")
+        fig_routing_confusion(routing_df)
+        fig_routing_by_category(routing_df)
+        fig_routing_metrics_bar(routing_summary)
+    else:
+        print(f"\n  ⚠ No routing results at {routing_csv}")
 
     # ── Prompting results ──
     prompt_csv = RESULTS_DIR / "prompting_eval_results.csv"

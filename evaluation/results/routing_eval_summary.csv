@@ -1,0 +1,2 @@
+n_scored,tp,fp,fn,tn,precision,recall,f1,accuracy
+45,25,3,2,15,0.8929,0.9259,0.9091,0.8889

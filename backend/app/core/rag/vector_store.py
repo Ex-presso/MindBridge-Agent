@@ -69,12 +69,17 @@ class VectorStore:
         chunk_overlap: int | None = None,
         collection_name: str | None = None,
         max_samples: int | None = None,
+        async_mode: bool = False,
     ):
         self.backend = backend
         self.chunk_size = chunk_size or settings.RAG_CHUNK_SIZE
         self.chunk_overlap = chunk_overlap or settings.RAG_CHUNK_OVERLAP
         self.collection_name = collection_name or settings.PGVECTOR_COLLECTION
         self.max_samples = max_samples
+        # async_mode=True is required for callers that use retriever.ainvoke()
+        # (e.g. the LangGraph agent). Sync eval scripts using retriever.invoke()
+        # should leave it False.
+        self.async_mode = async_mode
 
         self.ds: Any = None
         self.vectorstore: Any = None
@@ -122,6 +127,7 @@ class VectorStore:
             collection_name=self.collection_name,
             connection=settings.DATABASE_URL,
             use_jsonb=True,
+            async_mode=self.async_mode,
         )
 
     def build_pgvector(self, batch_size: int = 1000) -> Any:

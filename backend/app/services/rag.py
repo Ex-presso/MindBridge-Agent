@@ -13,8 +13,12 @@ _lock = asyncio.Lock()
 
 
 def _load_store_sync() -> VectorStore:
-    """Blocking I/O — runs in thread executor."""
-    store = VectorStore(backend="pgvector")
+    """Blocking I/O — runs in thread executor.
+
+    Production callers (agent tool) use retriever.ainvoke(), so pgvector is
+    initialized with async_mode=True. The FAISS fallback remains sync.
+    """
+    store = VectorStore(backend="pgvector", async_mode=True)
     try:
         store.load()
     except Exception:
