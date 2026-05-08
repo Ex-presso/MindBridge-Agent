@@ -338,6 +338,69 @@ def generate_ir_summary_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Reference-Based Eval Figures (vs MentalChat16K hold-out)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def fig_reference_distributions(df: pd.DataFrame) -> None:
+    """Histogram of BERTScore F1 and cosine similarity over the hold-out."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+
+    sns.histplot(df["bertscore_f1"], bins=20, ax=axes[0], color=PALETTE[0], kde=True)
+    axes[0].axvline(df["bertscore_f1"].mean(), color="black", linestyle="--", lw=1)
+    axes[0].set_title(f"BERTScore F1 (mean={df['bertscore_f1'].mean():.3f})")
+    axes[0].set_xlabel("BERTScore F1")
+    axes[0].set_ylabel("Count")
+    axes[0].grid(axis="y", alpha=0.25)
+
+    sns.histplot(df["cosine_similarity"], bins=20, ax=axes[1], color=PALETTE[1], kde=True)
+    axes[1].axvline(df["cosine_similarity"].mean(), color="black", linestyle="--", lw=1)
+    axes[1].set_title(f"Embedding Cosine Sim (mean={df['cosine_similarity'].mean():.3f})")
+    axes[1].set_xlabel("Cosine Similarity")
+    axes[1].set_ylabel("Count")
+    axes[1].grid(axis="y", alpha=0.25)
+
+    fig.suptitle(f"Reference-Based Eval over {len(df)} hold-out queries", y=1.02)
+    fig.savefig(PICS_DIR / "reference_distributions.png")
+    plt.close()
+    print("  ✓ reference_distributions.png")
+
+
+def fig_reference_scatter(df: pd.DataFrame) -> None:
+    """Scatter: cosine similarity vs BERTScore F1 — agreement between metrics."""
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.scatter(df["cosine_similarity"], df["bertscore_f1"],
+               s=40, alpha=0.6, color=PALETTE[2], edgecolors="white", linewidth=0.5)
+
+    pearson_r = df[["cosine_similarity", "bertscore_f1"]].corr().iloc[0, 1]
+    ax.set_xlabel("Embedding Cosine Similarity")
+    ax.set_ylabel("BERTScore F1")
+    ax.set_title(f"Metric Agreement (Pearson r = {pearson_r:.3f}, n={len(df)})")
+    ax.grid(True, alpha=0.25)
+    fig.savefig(PICS_DIR / "reference_metric_scatter.png")
+    plt.close()
+    print("  ✓ reference_metric_scatter.png")
+
+
+def fig_reference_pr_box(df: pd.DataFrame) -> None:
+    """Box plot of BERTScore precision/recall/F1."""
+    melted = df[["bertscore_p", "bertscore_r", "bertscore_f1"]].rename(
+        columns={"bertscore_p": "Precision", "bertscore_r": "Recall", "bertscore_f1": "F1"}
+    ).melt(var_name="Metric", value_name="Score")
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    sns.boxplot(data=melted, x="Metric", y="Score", palette=PALETTE[:3], ax=ax)
+    sns.stripplot(data=melted, x="Metric", y="Score", color="black", size=2.5, alpha=0.4, ax=ax)
+    ax.set_title(f"BERTScore Distribution (n={len(df)}, rescaled with baseline)")
+    # Baseline-rescaled scores are unbounded below (can dip slightly negative
+    # for adversarial pairs) and capped at 1; let matplotlib pick limits.
+    ax.grid(axis="y", alpha=0.25)
+    fig.savefig(PICS_DIR / "reference_pr_box.png")
+    plt.close()
+    print("  ✓ reference_pr_box.png")
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Agent Routing Benchmark Figures
 # ═══════════════════════════════════════════════════════════════════
 
@@ -624,6 +687,26 @@ def main():
         generate_ir_summary_table(ir_df)
     else:
         print(f"\n  ⚠ No retrieval IR results at {ir_csv}")
+
+    # ── Reference-based results ──
+    ref_csv = RESULTS_DIR / "reference_eval_results.csv"
+    if ref_csv.exists():
+        print("\n── Reference-Based Eval Analysis ──")
+        ref_df = pd.read_csv(ref_csv)
+        if "bertscore_f1" in ref_df.columns:
+            # Drop rows missing scores (still being generated) OR with empty
+            # responses (rescaled BERTScore on empty produces nonsensical
+            # extreme negatives that distort plots).
+            ref_df = ref_df.dropna(subset=["bertscore_f1", "cosine_similarity"])
+            ref_df = ref_df[ref_df["response"].fillna("").str.len() > 0]
+            print(f"  Loaded {len(ref_df)} scored, non-empty references")
+            fig_reference_distributions(ref_df)
+            fig_reference_scatter(ref_df)
+            fig_reference_pr_box(ref_df)
+        else:
+            print("  (CSV missing similarity columns — eval may still be running)")
+    else:
+        print(f"\n  ⚠ No reference results at {ref_csv}")
 
     # ── Routing results ──
     routing_csv = RESULTS_DIR / "routing_eval_results.csv"

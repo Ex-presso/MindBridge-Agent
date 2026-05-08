@@ -1,0 +1,33 @@
+# Reference-based eval against MentalChat16K hold-out.
+#
+# For each held-out (input, counselor_output) pair, we run the LangGraph
+# agent on the input and score the agent's response against the counselor
+# output via:
+#   - BERTScore (precision, recall, F1) — semantic similarity
+#   - Embedding cosine similarity using the indexing embedding model
+
+benchmark_path: "datasets/reference_benchmark.json"
+
+# LLM config (same as routing eval — local LM Studio).
+llm_provider: "openai_compatible"
+llm_model: "nvidia/nemotron-3-nano-4b"
+llm_base_url: "http://localhost:1234/v1"
+llm_api_key: "lm-studio"
+temperature: 0.3              # match production agent default
+
+# pgvector collection used by the agent's RAG tool.
+pgvector_collection: "ir_eval_cs1000_co100"
+
+# BERTScore model. roberta-large is the bert_score default for English
+# and gives the strongest correlation with human judgment, but it's the
+# largest. Switch to "microsoft/deberta-xlarge-mnli" (best per BERTScore
+# benchmarks) if quality > speed matters.
+bertscore_model: "roberta-large"
+bertscore_lang: "en"
+
+# Embedding model used for cosine similarity between agent response and
+# counselor reference. Note: this is general-purpose retrieval-tuned, not
+# fine-tuned on therapy or empathy — it captures topical/semantic alignment,
+# not "counselor-likeness." BERTScore-F1 (with baseline rescaling) is the
+# primary signal; cosine here is a coarser secondary check.
+embedding_model: "Qwen/Qwen3-Embedding-0.6B"
