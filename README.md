@@ -14,7 +14,7 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 - **Conversation memory** — server-side conversation persistence via LangGraph's PostgreSQL checkpointer; clients send only the new message
 - **Real-time streaming** — token-level SSE streaming for responsive chat
 - **JWT authentication** — access tokens + httpOnly refresh cookies, bcrypt password hashing
-- **Evaluation framework** — LLM-as-judge scoring across prompting strategies (Rogerian vs CBT vs Baseline) and RAG parameter sweeps
+- **Five-layer evaluation framework** — retrieval IR (Recall/NDCG), agent routing (P/R/F1), reference-based (BERTScore vs MentalChat16K hold-out), LLM-as-judge with split generator/judge, and a safety probe suite. Full methodology in [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Architecture
 
@@ -171,24 +171,17 @@ Users configure their own API keys via the **Settings** page in the frontend. No
 
 ## Evaluation
 
-MindBridge includes an evaluation framework that measures response quality using an LLM-as-judge approach across two dimensions:
+MindBridge ships with a five-layer evaluation framework that runs entirely on local LLMs (no external API keys). Each layer isolates one variable in the stack — full methodology, results, and limitations are in **[docs/EVALUATION.md](docs/EVALUATION.md)**.
 
-**1. RAG Parameter Sweep** — Grid search over chunk size (500–2000), chunk overlap (50–200), and top-k (1–10) to find optimal retrieval settings.
+| Layer | What it measures | Headline result |
+|-------|------------------|-----------------|
+| Retrieval IR | Recall@k / NDCG@k / MRR over a 30-query benchmark with cluster gold | NDCG@5 = 0.537 (chunk_size=2000) |
+| Agent routing | Whether the LangGraph agent invokes the RAG tool when it should | F1 = 0.909 on 50 hand-labeled queries |
+| Reference-based | BERTScore (baseline-rescaled) + cosine sim vs MentalChat16K hold-out | F1 = 0.139, cosine = 0.637 (n=99) |
+| LLM-as-judge | Empathy + safety on 6 prompt × RAG conditions, Holm-corrected | CBT < Baseline (p=0.004**); Rogerian ≈ Baseline (ns) |
+| Safety probes | Crisis / diagnosis / medication / jailbreak / minor refusal rates | **0% crisis-referral on self-harm probes** — production gap |
 
-**2. Prompting Strategy Comparison** — Compares three strategies, each tested with and without RAG:
-
-| Strategy  | Approach                                           |
-|-----------|----------------------------------------------------|
-| Rogerian  | Non-directive, reflective, person-centered         |
-| CBT       | Structured, identifies cognitive distortions       |
-| Baseline  | Generic empathetic assistant (control)             |
-
-**Scoring rubric** (1–5 on each dimension):
-- Empathy — emotional attunement and validation
-- Therapeutic alliance — trust and rapport building
-- Safety — avoids diagnoses, harmful advice
-- Coherence — clarity and logical structure
-- Helpfulness — actionable support and substance
+The judge is split from the generator (`Qwen3.5-27B-Claude-distilled` vs `Nemotron-3-Nano-4B`) to avoid self-bias; under same-model self-judging the previous eval produced near-ceiling 4.5–5.0 scores with zero significant differences. The safety eval surfaces a real production gap (the Rogerian system prompt produces empathic reflection without crisis routing) that would require a safety-rail prompt or upstream classifier before deployment.
 
 ### Running the Evaluation
 
@@ -196,58 +189,26 @@ MindBridge includes an evaluation framework that measures response quality using
 cd evaluation
 uv sync
 
-# Quick smoke test (3 queries)
-uv run python run_all.py --quick --skip-analysis
+# Build benchmarks (deterministic, seed=42)
+uv run python build_ir_benchmark.py
+uv run python build_reference_benchmark.py
 
-# Full evaluation (10 queries × all configs)
-uv run python run_all.py --skip-analysis
+# Run any layer
+uv run python eval_retrieval.py     # IR benchmark + 9-config sweep
+uv run python eval_routing.py       # 50 routing queries
+uv run python eval_reference.py     # 100-query BERTScore vs counselor
+uv run python eval_prompting.py     # 6 condition × 10 query judge eval
+uv run python eval_safety.py        # 20 safety probes
 
-# Generate analysis figures after evaluation
-python analysis/analyze.py
+# Generate all figures and summary tables
+python ../analysis/analyze.py
 ```
 
-> Requires PostgreSQL (pgvector) running and a local LLM loaded in LM Studio. Does **not** require the web server.
+Requires PostgreSQL (pgvector) running and an LM Studio server with both
+`nvidia/nemotron-3-nano-4b` and `qwen3.5-27b-claude-4.6-opus-distilled-mlx@4bit`
+loaded. Does not require the web server.
 
-### RAG Parameter Results
-
-Evaluated `chunk_size ∈ {500, 1000, 2000}` with `chunk_overlap=100`, `top_k=3` using **Qwen3-Embedding-0.6B** (local, sentence-transformers) for retrieval and **Nemotron Nano 4B** (local, LM Studio) as judge. Scored on 10 mental-health queries across anxiety, depression, grief, loneliness, self-esteem, and substance categories.
-
-| Chunk Size | Avg Quality | Retrieval Relevance | Retrieval Latency |
-|-----------|-------------|---------------------|-------------------|
-| **2000**  | **4.86**    | 0.748               | 0.393s            |
-| 1000      | 4.44        | 0.771               | 0.434s            |
-| 500       | 3.74        | 0.769               | 0.589s            |
-
-**Finding:** Larger chunks (2000 chars) provide more coherent context and yield significantly higher response quality, despite slightly lower retrieval relevance scores. Chunk size 2000 is used as the production default.
-
-![RAG Quality Heatmap](analysis/pics/rag_heatmap_quality.png)
-![RAG Metrics by Chunk Size](analysis/pics/rag_metrics_by_chunk.png)
-![Retrieval Relevance vs Response Quality](analysis/pics/rag_relevance_vs_quality.png)
-
-### Prompting Strategy Results
-
-Compared Rogerian, CBT-Informed, and Baseline strategies — each tested with and without RAG — using the optimal RAG config (chunk_size=2000). Judge: **Nemotron Nano 4B** (local).
-
-| Strategy              | RAG  | Empathy | Alliance | Safety | Coherence | Helpfulness | **Avg** |
-|-----------------------|------|---------|----------|--------|-----------|-------------|---------|
-| Baseline              | No   | 5.0     | 5.0      | 5.0    | 5.0       | 4.9         | **4.98**|
-| CBT-Informed          | No   | 5.0     | 4.9      | 5.0    | 5.0       | 4.9         | **4.96**|
-| CBT-Informed          | Yes  | 4.8     | 4.8      | 5.0    | 5.0       | 4.9         | 4.90    |
-| Rogerian              | Yes  | 4.9     | 4.9      | 5.0    | 5.0       | 3.9         | 4.74    |
-| Rogerian              | No   | 4.8     | 4.9      | 5.0    | 4.4       | 4.1         | 4.64    |
-| Baseline              | Yes  | 4.6     | 4.6      | 4.5    | 4.6       | 4.2         | 4.50    |
-
-**Findings:**
-- All strategies achieve very high safety scores (≥4.5), confirming the system avoids harmful advice
-- No strategy difference is statistically significant (Wilcoxon p>0.05 for all pairs), likely due to the small sample size (n=10)
-- RAG shows mixed impact: helps Rogerian coherence (+0.6) but slightly reduces Baseline scores — the added context may increase response length and complexity
-- CBT-Informed without RAG is the most consistently high-scoring condition (4.96 avg)
-
-![Strategy Radar Chart](analysis/pics/prompting_radar.png)
-![RAG Impact per Strategy](analysis/pics/prompting_rag_impact.png)
-![Score Distributions](analysis/pics/prompting_boxplot.png)
-
-> **Note:** Results are based on 10 queries per condition judged by a local 4B-parameter model. Larger-scale evaluation with a stronger judge would improve reliability.
+See **[docs/EVALUATION.md](docs/EVALUATION.md)** for full methodology, all per-condition results, statistical tests, figures, and limitations.
 
 ## Project Structure
 
@@ -273,13 +234,22 @@ MindBridge/
 │       ├── lib/             # API client, SSE stream reader
 │       └── stores/          # Zustand auth store
 ├── evaluation/
-│   ├── configs/             # RAG + prompting strategy YAML configs
-│   ├── datasets/            # Evaluation queries
-│   ├── metrics/             # LLM judge scoring
-│   └── results/             # Output CSVs
+│   ├── build_ir_benchmark.py        # curates 30-query IR test set (seed=42)
+│   ├── build_reference_benchmark.py # curates 100 hold-out queries
+│   ├── eval_retrieval.py            # IR sweep (chunk_size × overlap × top_k)
+│   ├── eval_routing.py              # agent's tool-call decision: P/R/F1
+│   ├── eval_reference.py            # BERTScore + cosine vs counselor refs
+│   ├── eval_prompting.py            # 6-condition judge eval (split judge)
+│   ├── eval_safety.py               # 20-probe safety suite
+│   ├── configs/                     # YAML configs per eval layer
+│   ├── datasets/                    # Frozen JSON benchmarks
+│   ├── metrics/                     # ir_metrics.py + LLMJudge
+│   └── results/                     # Output CSVs (per-query + summary)
 ├── analysis/
-│   ├── analyze.py           # Scientific figure generation script
-│   └── pics/                # Output figures (PNG)
+│   ├── analyze.py                   # Generates all figures + summary tables
+│   └── pics/                        # 20+ output figures (PNG)
+├── docs/
+│   └── EVALUATION.md                # Full methodology, results, limitations
 └── docker-compose.yml
 ```
 
@@ -291,8 +261,9 @@ MindBridge/
 | Backend    | FastAPI, LangGraph, LangChain, SQLAlchemy (async), Pydantic   |
 | Database   | PostgreSQL 16 + pgvector                                      |
 | Auth       | JWT (python-jose), bcrypt, Fernet encryption                  |
-| LLM        | OpenAI, Anthropic, Google Gemini (via LangChain)              |
-| RAG        | FAISS vector store, LangChain text splitters                  |
+| LLM        | OpenAI, Anthropic, Google Gemini (via LangChain); LM Studio for local eval |
+| RAG        | pgvector, sentence-transformers (Qwen3-Embedding-0.6B), LangChain text splitters |
+| Eval       | bert-score (roberta-large), scipy (Wilcoxon + Holm), pandas, matplotlib/seaborn |
 | Deployment | Docker Compose                                                |
 | Tooling    | uv (Python), npm (Node.js)                                    |
 
