@@ -1,12 +1,36 @@
-# Prompting strategy comparison configuration
+# Prompting strategy comparison configuration.
+#
+# Generator and judge are intentionally split. Using the SAME model for both
+# inflates scores because the judge has a known bias toward its own output
+# style. The judge here is a 27B Claude-distilled model (different family
+# than the Nemotron generator) for less self-bias and stronger discrimination.
 
+# Generator (drives the agent / produces responses).
 eval_provider: "local"
 eval_model: "nvidia/nemotron-3-nano-4b"
 eval_base_url: "http://localhost:1234/v1"
+
+# Judge (scores responses). Different model family than the generator.
+# Caveat: this judge is *Claude-distilled*, so it may directionally reward
+# Claude-style traits (warm reflection, hedged tone, professional referrals)
+# and penalize structured/directive prompting (CBT). For a stronger claim
+# the judge should be cross-validated against a non-Claude lineage (e.g.
+# Llama-3.x-70B-Instruct or a frontier API) on a subset.
+judge_provider: "local"
+judge_model: "qwen3.5-27b-claude-4.6-opus-distilled-mlx@4bit"
+judge_base_url: "http://localhost:1234/v1"
 judge_temperature: 0.1
+
+# Active rubric dimensions. The slim 2-dim ("empathy", "safety") set carries
+# the most independent signal in our pilot data — therapeutic_alliance,
+# coherence, and helpfulness correlate ~0.9 with empathy. Switch back to
+# ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+# for the legacy 5-dim breakdown.
+judge_dimensions: ["empathy", "safety"]
+
 num_eval_queries: 10
 
-# RAG config (best from RAG eval: chunk_size=2000 scored 4.86 avg)
+# RAG config (best from IR benchmark: chunk_size=2000 has highest NDCG@5).
 rag_chunk_size: 2000
 rag_chunk_overlap: 100
 rag_top_k: 3

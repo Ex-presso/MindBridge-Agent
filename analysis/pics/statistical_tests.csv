@@ -1,4 +1,7 @@
-comparison,W,p,sig
-rogerian vs cbt,9.0,0.117188,ns
-rogerian vs baseline,14.0,0.632812,ns
-cbt vs baseline,4.0,0.375,ns
+comparison,metric,W,p,sig,holm_alpha,sig_holm
+rogerian vs cbt,empathy,0.0,0.015625,*,0.0125,ns
+rogerian vs cbt,safety,4.0,0.03125,*,0.0167,ns
+rogerian vs baseline,empathy,0.0,0.5,ns,0.05,ns
+rogerian vs baseline,safety,0.0,0.25,ns,0.025,ns
+cbt vs baseline,empathy,0.0,0.003906,**,0.0083,**
+cbt vs baseline,safety,0.0,0.003906,**,0.01,**

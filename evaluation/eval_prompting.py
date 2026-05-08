@@ -113,20 +113,35 @@ def run_prompting_evaluation(max_queries: int | None = None) -> pd.DataFrame:
     queries = load_queries(max_queries or config.get("num_eval_queries", 50))
     strategies = config["strategies"]
 
-    provider = config.get("eval_provider", "local")
-    base_url = config.get("eval_base_url", "http://localhost:1234/v1")
+    gen_provider = config.get("eval_provider", "local")
+    gen_base_url = config.get("eval_base_url", "http://localhost:1234/v1")
+
+    # Judge defaults to the generator only for backward compat — production
+    # configs should override these to keep the judge separate from the
+    # generator (different model family preferred).
+    judge_provider = config.get("judge_provider", gen_provider)
+    judge_model = config.get("judge_model", config["eval_model"])
+    judge_base_url = config.get("judge_base_url", gen_base_url)
+    judge_dimensions = tuple(
+        config.get("judge_dimensions", LLMJudge.LEGACY_DIMENSIONS)
+    )
+
+    print(f"Generator: {config['eval_model']} (provider={gen_provider})")
+    print(f"Judge:     {judge_model} (provider={judge_provider})")
+    print(f"Judge dims: {list(judge_dimensions)}")
 
     judge = LLMJudge(
-        model=config["eval_model"],
+        model=judge_model,
         temperature=config["judge_temperature"],
-        provider=provider,
-        base_url=base_url,
+        provider=judge_provider,
+        base_url=judge_base_url,
+        dimensions=judge_dimensions,
     )
     response_llm = _create_llm(
         model=config["eval_model"],
         temperature=0.3,
-        provider=provider,
-        base_url=base_url,
+        provider=gen_provider,
+        base_url=gen_base_url,
     )
 
     # Determine conditions
@@ -179,6 +194,13 @@ def run_prompting_evaluation(max_queries: int | None = None) -> pd.DataFrame:
             response_time = time.time() - t0
 
             scores = judge.score(query_text, response)
+            score_dict = scores.to_dict()
+            # Override the legacy 5-dim `average` so it reflects only the
+            # actually-scored dimensions. The slim 2-dim rubric pins 3 of 5
+            # legacy columns at 3.0, which would otherwise drag the average
+            # toward 3 and obscure real differences.
+            active_vals = [score_dict[d] for d in judge_dimensions]
+            score_dict["average"] = round(sum(active_vals) / len(active_vals), 2)
 
             results.append(
                 {
@@ -189,7 +211,7 @@ def run_prompting_evaluation(max_queries: int | None = None) -> pd.DataFrame:
                     "use_rag": use_rag,
                     "condition": f"{strategy_key}_{'rag' if use_rag else 'norag'}",
                     "response_time_s": round(response_time, 3),
-                    **scores.to_dict(),
+                    **score_dict,
                     "response_text": response,
                 }
             )

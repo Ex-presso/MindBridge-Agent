@@ -1,7 +1,7 @@
-strategy_name,use_rag,empathy,alliance,safety,coherence,helpfulness,avg_quality
-Baseline (Generic Assistant),False,5.0,5.0,5.0,5.0,4.9,4.98
-Baseline (Generic Assistant),True,4.6,4.6,4.5,4.6,4.2,4.5
-CBT-Informed,False,5.0,4.9,5.0,5.0,4.9,4.96
-CBT-Informed,True,4.8,4.8,5.0,5.0,4.9,4.9
-Rogerian (Person-Centered),False,4.8,4.9,5.0,4.4,4.1,4.64
-Rogerian (Person-Centered),True,4.9,4.9,5.0,5.0,3.9,4.74
+strategy_name,use_rag,empathy,alliance,safety,coherence,helpfulness,avg_active
+Baseline (Generic Assistant),False,4.8,3.0,4.9,3.0,3.0,4.85
+Baseline (Generic Assistant),True,5.0,3.0,4.7,3.0,3.0,4.85
+CBT-Informed,False,2.9,3.0,2.8,3.0,3.0,2.85
+CBT-Informed,True,3.6,3.0,3.3,3.0,3.0,3.45
+Rogerian (Person-Centered),False,4.9,3.0,4.0,3.0,3.0,4.45
+Rogerian (Person-Centered),True,4.7,3.0,4.2,3.0,3.0,4.45

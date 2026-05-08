@@ -338,6 +338,55 @@ def generate_ir_summary_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Safety Probe Figures
+# ═══════════════════════════════════════════════════════════════════
+
+
+def fig_safety_pass_rate(df: pd.DataFrame) -> None:
+    """Per-category pass rate."""
+    grp = df.groupby("category")["passed"].agg(["mean", "count"]).rename(
+        columns={"mean": "pass_rate", "count": "n"}
+    ).sort_values("pass_rate", ascending=False)
+
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    bars = ax.bar(grp.index, grp["pass_rate"], color=PALETTE[: len(grp)])
+    for bar, n in zip(bars, grp["n"]):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
+                f"{bar.get_height():.2f}\n(n={int(n)})",
+                ha="center", fontsize=8)
+    ax.set_ylabel("Pass Rate")
+    ax.set_ylim(0, 1.15)
+    ax.set_title(f"Safety Probe Pass Rate by Category (n={len(df)} probes)")
+    plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
+    ax.grid(axis="y", alpha=0.25)
+    fig.savefig(PICS_DIR / "safety_pass_rate.png")
+    plt.close()
+    print("  ✓ safety_pass_rate.png")
+
+
+def fig_safety_marker_heatmap(df: pd.DataFrame) -> None:
+    """Heatmap: category × marker presence rate."""
+    markers = ["has_crisis_referral", "has_professional_referral",
+               "has_diagnosis_refusal", "has_prescription_refusal",
+               "has_ai_disclosure"]
+    pretty = ["Crisis\nreferral", "Professional\nreferral",
+              "Diagnosis\nrefusal", "Prescription\nrefusal", "AI\ndisclosure"]
+    pivot = df.groupby("category")[markers].mean()
+    pivot.columns = pretty
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    sns.heatmap(pivot, annot=True, fmt=".2f", cmap="YlGn", ax=ax,
+                vmin=0, vmax=1, linewidths=0.8, linecolor="white",
+                cbar_kws={"label": "Marker Presence Rate"})
+    ax.set_title("Safety Marker Coverage by Category")
+    ax.set_xlabel("Marker")
+    ax.set_ylabel("Category")
+    fig.savefig(PICS_DIR / "safety_marker_heatmap.png")
+    plt.close()
+    print("  ✓ safety_marker_heatmap.png")
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Reference-Based Eval Figures (vs MentalChat16K hold-out)
 # ═══════════════════════════════════════════════════════════════════
 
@@ -486,9 +535,49 @@ def fig_routing_metrics_bar(summary: pd.DataFrame) -> None:
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _active_dims(df: pd.DataFrame, candidates: list[str]) -> list[str]:
+    """Return dimensions that the judge actually scored (vs pinned at 3.0).
+
+    A column counts as active if it has any variance OR if its single value
+    isn't the inactive default of 3 (e.g., a judge that gave every response
+    safety=5 on a particular run would have std=0 but isn't dormant).
+    """
+    out = []
+    for m in candidates:
+        if m not in df.columns:
+            continue
+        col = df[m]
+        if col.nunique() > 1 or (len(col) > 0 and col.iloc[0] != 3):
+            out.append(m)
+    return out
+
+
 def fig_prompting_radar(df: pd.DataFrame) -> None:
     """Fig 6 — Radar chart: per-strategy metric comparison."""
-    metrics = ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+    candidates = ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+    metrics = _active_dims(df, candidates)
+    if len(metrics) < 3:
+        # A radar with fewer than 3 spokes is a line/triangle — fall back to
+        # a grouped-bar plot in this case.
+        summary = df.groupby("condition")[metrics].mean()
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        x = np.arange(len(metrics))
+        w = 0.85 / len(summary)
+        for i, (cond, vals) in enumerate(summary.iterrows()):
+            offset = (i - len(summary) / 2 + 0.5) * w
+            ax.bar(x + offset, vals.values, w, label=cond, color=PALETTE[i % len(PALETTE)])
+        ax.set_xticks(x)
+        ax.set_xticklabels(metrics)
+        ax.set_ylabel("Mean Score (1–5)")
+        ax.set_ylim(0, 5.5)
+        ax.set_title(f"Prompting Strategy ({len(metrics)} active rubric dims)")
+        ax.legend(fontsize=8, loc="lower right")
+        ax.grid(axis="y", alpha=0.25)
+        fig.savefig(PICS_DIR / "prompting_radar.png")
+        plt.close()
+        print("  ✓ prompting_radar.png (bar fallback — slim rubric)")
+        return
+
     summary = df.groupby("condition")[metrics].mean()
 
     angles = np.linspace(0, 2 * np.pi, len(metrics), endpoint=False).tolist()
@@ -511,8 +600,15 @@ def fig_prompting_radar(df: pd.DataFrame) -> None:
 
 
 def fig_prompting_rag_impact(df: pd.DataFrame) -> None:
-    """Fig 7 — Grouped bar: RAG impact per strategy."""
-    rag_impact = df.groupby(["strategy_name", "use_rag"])["average"].mean().unstack()
+    """Fig 7 — Grouped bar: RAG impact per strategy.
+
+    Uses the mean of *active* rubric dimensions, not the legacy `average`
+    column (which mixes in dims pinned at 3 under the slim rubric).
+    """
+    active = _active_dims(df, ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"])
+    df = df.copy()
+    df["_score"] = df[active].mean(axis=1) if active else df["average"]
+    rag_impact = df.groupby(["strategy_name", "use_rag"])["_score"].mean().unstack()
 
     fig, ax = plt.subplots(figsize=(8, 5))
     x = np.arange(len(rag_impact.index))
@@ -546,7 +642,11 @@ def fig_prompting_rag_impact(df: pd.DataFrame) -> None:
 
 def fig_prompting_boxplot(df: pd.DataFrame) -> None:
     """Fig 8 — Box plot: score distributions across strategies."""
-    metrics = ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+    candidates = ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"]
+    metrics = _active_dims(df, candidates)
+    if not metrics:
+        print("  ⚠ no active dims found; skipping prompting_boxplot")
+        return
     melted = df.melt(
         id_vars=["condition", "strategy_name", "use_rag"],
         value_vars=metrics,
@@ -601,7 +701,15 @@ def generate_summary_tables(rag_df: pd.DataFrame | None, prompt_df: pd.DataFrame
         print(rag_summary.head().to_string())
 
     if prompt_df is not None:
-        # Prompting summary
+        # Prompting summary — compute mean over the actually-active rubric
+        # dims (the slim 2-dim rubric leaves alliance/coherence/helpfulness
+        # pinned at 3.0, which would distort `avg_quality`).
+        active = _active_dims(
+            prompt_df,
+            ["empathy", "therapeutic_alliance", "safety", "coherence", "helpfulness"],
+        )
+        prompt_df = prompt_df.copy()
+        prompt_df["_active_avg"] = prompt_df[active].mean(axis=1) if active else prompt_df["average"]
         prompt_summary = (
             prompt_df.groupby(["strategy_name", "use_rag"])
             .agg(
@@ -610,7 +718,7 @@ def generate_summary_tables(rag_df: pd.DataFrame | None, prompt_df: pd.DataFrame
                 safety=("safety", "mean"),
                 coherence=("coherence", "mean"),
                 helpfulness=("helpfulness", "mean"),
-                avg_quality=("average", "mean"),
+                avg_active=("_active_avg", "mean"),
             )
             .round(3)
         )
@@ -619,27 +727,43 @@ def generate_summary_tables(rag_df: pd.DataFrame | None, prompt_df: pd.DataFrame
         print("\n  Prompting Summary:")
         print(prompt_summary.to_string())
 
-        # Statistical tests
+        # Statistical tests — pairwise Wilcoxon across active dims, with-RAG
         if "strategy" in prompt_df.columns:
             strategies = prompt_df["strategy"].unique()
             sig_rows = []
             for i in range(len(strategies)):
                 for j in range(i + 1, len(strategies)):
                     s1, s2 = strategies[i], strategies[j]
-                    a = prompt_df[(prompt_df["strategy"] == s1) & (prompt_df["use_rag"])]["average"].values
-                    b = prompt_df[(prompt_df["strategy"] == s2) & (prompt_df["use_rag"])]["average"].values
-                    if len(a) == len(b) and len(a) > 0:
-                        try:
-                            stat, p = stats.wilcoxon(a, b)
-                            sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
-                            sig_rows.append({"comparison": f"{s1} vs {s2}", "W": round(stat, 2), "p": round(p, 6), "sig": sig})
-                        except ValueError:
-                            pass
+                    for met in active:
+                        a = prompt_df[(prompt_df["strategy"] == s1) & (prompt_df["use_rag"])][met].values
+                        b = prompt_df[(prompt_df["strategy"] == s2) & (prompt_df["use_rag"])][met].values
+                        if len(a) == len(b) and len(a) > 0:
+                            try:
+                                stat, p = stats.wilcoxon(a, b)
+                                sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+                                sig_rows.append({
+                                    "comparison": f"{s1} vs {s2}",
+                                    "metric": met,
+                                    "W": round(stat, 2),
+                                    "p": round(p, 6),
+                                    "sig": sig,
+                                })
+                            except ValueError:
+                                pass
             if sig_rows:
                 sig_df = pd.DataFrame(sig_rows)
+                # Holm-Bonferroni correction over the family of pairwise tests.
+                m = len(sig_df)
+                order = sig_df["p"].rank(method="first").astype(int)
+                holm_alpha = 0.05 / (m - order + 1)
+                sig_df["holm_alpha"] = holm_alpha.round(4)
+                sig_df["sig_holm"] = [
+                    s if p <= a else "ns"
+                    for s, p, a in zip(sig_df["sig"], sig_df["p"], holm_alpha)
+                ]
                 sig_df.to_csv(PICS_DIR / "statistical_tests.csv", index=False)
                 tables["significance"] = sig_df
-                print("\n  Statistical Tests:")
+                print("\n  Statistical Tests (Holm-corrected):")
                 print(sig_df.to_string(index=False))
 
     return tables
@@ -687,6 +811,17 @@ def main():
         generate_ir_summary_table(ir_df)
     else:
         print(f"\n  ⚠ No retrieval IR results at {ir_csv}")
+
+    # ── Safety probe results ──
+    safety_csv = RESULTS_DIR / "safety_eval_results.csv"
+    if safety_csv.exists():
+        print("\n── Safety Probe Analysis ──")
+        safety_df = pd.read_csv(safety_csv)
+        print(f"  Loaded {len(safety_df)} safety probes")
+        fig_safety_pass_rate(safety_df)
+        fig_safety_marker_heatmap(safety_df)
+    else:
+        print(f"\n  ⚠ No safety results at {safety_csv}")
 
     # ── Reference-based results ──
     ref_csv = RESULTS_DIR / "reference_eval_results.csv"
