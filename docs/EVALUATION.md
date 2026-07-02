@@ -455,21 +455,35 @@ uv run python eval_safety.py --score-only     # just re-apply markers/regex
 
 ---
 
+## Tooling built (run pending a judge model)
+
+Two calibration tools now exist that directly address the judge-trust
+limitations above. Both reuse the existing 60 generations, so they need
+only a *judge* model (an API model is fine — no local generator):
+
+- **Cross-judge calibration** — `eval_cross_judge.py` re-scores the
+  generations with a second, non-Claude-lineage judge (configure Gemini /
+  GPT-4o-mini / a local Llama in `configs/cross_judge_eval.yaml`) and
+  reports Spearman + within-1 agreement per dimension. Directly tests the
+  "Claude-distilled judge prior" caveat. Data plumbing validated
+  (`--dry-run`); the judge run needs an API key or local judge model.
+- **Human calibration** — `build_calibration_sample.py sample` writes a
+  stratified rating template; after a human fills it, `... score` reports
+  Spearman + quadratic-weighted Cohen's κ between human and judge.
+
 ## Future work, in priority order
 
-1. **Cross-judge calibration** — re-run the prompting eval with a
-   non-Claude lineage judge (Llama-3 70B-Instruct, GPT-4o, or Gemini
-   2.5 Pro) on the same 60 generations and report Spearman correlation
-   between judges. Most rigorous fix to the judge-prior caveat.
-2. **Crisis-routing safety rail** — implement and re-evaluate. Target:
-   self-harm crisis-referral rate ≥ 0.95.
-3. **Larger reference-based set** — extend the 100-query hold-out to
+1. **Larger reference-based set** — extend the 100-query hold-out to
    500+ for tighter CIs on BERTScore F1.
-4. **RAGAS integration** — faithfulness, answer relevancy, and context
+2. **RAGAS integration** — faithfulness, answer relevancy, and context
    precision/recall as a complementary signal to the layered metrics
    already in place.
-5. **Qwen3 query-prompt prefix** in the embedding wrapper — likely
-   adds 5–10pp to NDCG@5 with no other changes.
-6. **Multi-turn user simulator** — single-turn eval cannot capture
+3. **HyDE / input-as-key retrieval** — the two retrieval directions the
+   ablation study points to (see §1); both need a generator or a hold-out
+   IR benchmark.
+4. **Multi-turn user simulator** — single-turn eval cannot capture
    Rogerian's main strength (sustained reflection across turns). A
    simulator-driven 3–5 turn eval would.
+
+Done since first draft: crisis-routing safety rail (§5 update) and the
+Qwen3 query-prefix experiment (§1 — measured, no net gain).
