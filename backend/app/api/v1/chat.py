@@ -64,6 +64,8 @@ def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: 
 @router.post("/chat/completions")
 async def chat_legacy(request: Request, body: ChatCompletionRequest):
     """Stateless OpenAI-compatible endpoint. No auth, no persistence."""
+    if not settings.ENABLE_LEGACY_CHAT_ENDPOINT:
+        raise HTTPException(status_code=404, detail="Not found.")
     provider = _resolve_provider(body)
     if not body.messages:
         raise HTTPException(status_code=400, detail="Messages cannot be empty.")
@@ -105,6 +107,7 @@ async def session_chat(
     db=Depends(get_db),
 ):
     """Stateful chat endpoint with conversation persistence and real streaming."""
+    t_start = time.time()
     if len(body.message.strip()) == 0:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
     if len(body.message) > settings.MAX_MESSAGE_LENGTH:
@@ -178,6 +181,12 @@ async def session_chat(
                         title = await conversation_service.generate_title(agent, body.message)
                         await conversation_repo.update_title(session, conv.id, title)
                     await session.commit()
+            # Request-level observability. A tracer (Langfuse/LangSmith) is the
+            # drop-in upgrade; this line already backs a latency/cost panel.
+            logger.info(
+                "chat stream: conv=%s provider=%s model=%s tokens=%s latency=%.2fs",
+                conv_id_str, provider, body.model, usage.get("total"), time.time() - t_start,
+            )
 
         return StreamingResponse(
             stream_response(),
@@ -208,6 +217,10 @@ async def session_chat(
             await conversation_repo.update_title(session, conv.id, title)
         await session.commit()
 
+    logger.info(
+        "chat: conv=%s provider=%s model=%s tokens=%s latency=%.2fs",
+        conv_id_str, provider, body.model, usage.get("total"), time.time() - t_start,
+    )
     return {
         "conversation_id": conv_id_str,
         "message": {"role": "assistant", "content": reply},

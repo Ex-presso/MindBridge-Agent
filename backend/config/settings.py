@@ -62,11 +62,27 @@ class Settings(BaseSettings):
 
     # Auth
     SECRET_KEY: str = "change-me-in-production-use-32-random-bytes"
+    # Separate key for encrypting user API keys (Fernet). Falls back to
+    # SECRET_KEY when unset — set it in production so rotating the JWT signing
+    # key doesn't also invalidate every stored API key. Rotating ENCRYPTION_KEY
+    # itself invalidates existing ciphertexts (expected key-rotation behavior).
+    ENCRYPTION_KEY: str | None = None
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Refresh-cookie Secure flag — must be True behind HTTPS in production.
+    COOKIE_SECURE: bool = False
 
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 20
+    # Stricter limit for auth endpoints (brute-force protection).
+    AUTH_RATE_LIMIT: str = "5/minute"
+
+    # Feature flags
+    # Legacy /chat/completions is unauthenticated and uses system keys — off by
+    # default; enable only for a trusted local OpenAI-compatible client.
+    ENABLE_LEGACY_CHAT_ENDPOINT: bool = False
+    # Create tables on startup (dev convenience). Use Alembic migrations in prod.
+    AUTO_CREATE_TABLES: bool = True
 
     # Max input length
     MAX_MESSAGE_LENGTH: int = 4000

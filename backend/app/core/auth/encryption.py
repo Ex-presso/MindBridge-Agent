@@ -8,7 +8,11 @@ from config.settings import settings
 
 
 def _get_cipher() -> Fernet:
-    key = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
+    # Prefer a dedicated encryption key; fall back to SECRET_KEY so existing
+    # deployments keep working. Separating them lets the JWT key rotate without
+    # invalidating stored API keys.
+    secret = settings.ENCRYPTION_KEY or settings.SECRET_KEY
+    key = hashlib.sha256(secret.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(key))
 
 

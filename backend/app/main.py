@@ -6,11 +6,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from app.api import router
+from app.core.rate_limit import limiter
 from config.settings import settings
 
 
@@ -50,20 +50,20 @@ def configure_logging() -> None:
 configure_logging()
 logger = logging.getLogger(__name__)
 
-# ── Rate limiting ─────────────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"])
-
-
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting MindBridge backend...")
 
-    # 1. Create DB tables (SQLAlchemy create_all; Alembic used for migrations in prod)
+    # 1. Create DB tables. Dev convenience only — production should run Alembic
+    #    migrations and set AUTO_CREATE_TABLES=False.
     from app.db.engine import engine, Base, AsyncSessionLocal
     from app.db.models import User, Conversation, Message, UserApiKey  # ensure models are registered
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    if settings.AUTO_CREATE_TABLES:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        logger.info("AUTO_CREATE_TABLES=False — skipping create_all (expecting Alembic-migrated schema).")
     app.state.db_session = AsyncSessionLocal
 
     # 2. Set up LangGraph PostgreSQL checkpointer
