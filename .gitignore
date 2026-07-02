@@ -63,3 +63,5 @@ backend/data/MentalChat16K_faiss_index/
 
 # documents
 product_plan.md
+docs/develop.md
+docs/system_arch.md
