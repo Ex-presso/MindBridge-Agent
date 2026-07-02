@@ -16,4 +16,7 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]
+# ponytail: single worker keeps the in-process rate limiter (and agent cache)
+# accurate — with N workers each keeps its own counters, diluting limits N×.
+# Move slowapi to shared storage (redis) before scaling workers.
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

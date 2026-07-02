@@ -10,9 +10,8 @@ source_csv: "results/prompting_eval_results.csv"
 queries_path: "datasets/eval_queries.json"
 
 # Second judge — pick a DIFFERENT lineage than the primary Claude-distilled
-# judge. Any of:
+# judge. Supported providers (see metrics/judge.py::_create_llm):
 #   - google_genai + gemini-2.5-flash   (API, a few cents for ~60 calls)
-#   - openai       + gpt-4o-mini        (API)
 #   - local        + a non-Claude LM Studio model (e.g. llama-3.x-instruct)
 judge_provider: "google_genai"
 judge_model: "gemini-2.5-flash"

@@ -16,20 +16,24 @@ from __future__ import annotations
 
 import re
 
-# Self-harm / suicidal ideation expressed in the first person, plus
-# method-seeking ("way to die", overdose). ponytail: regex has a real ceiling
-# on indirect phrasing — a borderline-case LLM classifier is the upgrade path
-# if false negatives matter more than the ~2s latency it would add. Detection
-# deliberately errs wide: a false positive just appends resources to an
-# otherwise-empathic reply (a safe failure).
+# Self-harm / suicidal ideation in the first person, plus method-seeking
+# ("way to die", overdose). Bare injury phrases ("hurt myself", "killing me",
+# "end it/things") are deliberately NOT matched — everyday idioms dominate them
+# (sports injuries, deadlines, breakups); self-injury requires an ideation verb
+# ("want to / thinking about / been ... hurting myself").
+# ponytail: regex has a real ceiling on indirect phrasing — a borderline-case
+# LLM classifier is the upgrade path if false negatives matter more than the
+# ~2s latency it would add.
 _SELF_HARM = re.compile(
     r"\b("
-    r"kill(?:ing)? myself|killing me|"
-    r"end(?:ing)? (?:it all|my life|things|it)|take (?:my|my own) life|"
+    r"kill(?:ing)? myself|"
+    r"end(?:ing)? (?:it all|my life)|take (?:my|my own) life|"
     r"suicid(?:e|al)|want(?:ing)? to die|wish(?:ing)? (?:i were|i was|to be) dead|"
     r"don'?t want to (?:live|be here|be alive|wake up|exist)|"
     r"no (?:reason|point) (?:to|in) (?:live|living|go on|going on)|"
-    r"better off (?:dead|without me)|hurt(?:ing)? myself|harm(?:ing)? myself|"
+    r"better off (?:dead|without me)|"
+    # self-injury gated on an ideation verb; bare "hurt myself" is usually an accident report
+    r"(?:want(?:ed|ing)? to|thinking (?:about|of)|thoughts? of|urge to|going to|might|been) (?:hurt|harm)(?:ing)? myself|"
     r"self[- ]harm|cut(?:ting)? myself|can'?t go on(?: anymore)?|"
     # method-seeking / overdose
     r"way(?:s)? to (?:die|kill myself|end (?:it|my life|myself))|"
@@ -40,11 +44,13 @@ _SELF_HARM = re.compile(
     re.IGNORECASE,
 )
 
-# Intent to harm another person. Kept conservative to limit false positives.
+# Intent to harm another person. Every alternative requires intent phrasing —
+# bare "kill him/everyone" was dominated by gaming/venting idioms.
 _HARM_OTHERS = re.compile(
     r"\b("
     r"(?:want|going|planning) to (?:kill|hurt|attack|stab|shoot) (?:him|her|them|someone|people|my)|"
-    r"kill (?:him|her|them|someone|everyone)|"
+    r"i'?ll (?:kill|hurt|stab|shoot) (?:him|her|them|someone)|"
+    r"(?:kill|shoot|hurt) everyone (?:at|in) (?:my |the )?(?:school|work|office|class)|"
     r"make (?:him|her|them) pay|hurt (?:someone|people) (?:else|badly)"
     r")\b",
     re.IGNORECASE,

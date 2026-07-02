@@ -156,8 +156,14 @@ class Agent:
         if len(convo) <= settings.SUMMARY_TRIGGER_MESSAGES or keep <= 0:
             return cast(State, {})
 
-        to_summarize = [m for m in messages[:-keep] if isinstance(m, (HumanMessage, AIMessage))]
-        prunable = [m for m in messages[:-keep] if getattr(m, "id", None)]
+        # Snap the cut to a HumanMessage boundary so a tool exchange
+        # (AIMessage.tool_calls + its ToolMessage) is never split — providers
+        # reject a history that opens with an orphaned tool message.
+        cut = len(messages) - keep
+        while cut > 0 and not isinstance(messages[cut], HumanMessage):
+            cut -= 1
+        to_summarize = [m for m in messages[:cut] if isinstance(m, (HumanMessage, AIMessage))]
+        prunable = [m for m in messages[:cut] if getattr(m, "id", None)]
         if not to_summarize:
             return cast(State, {})
 
@@ -237,7 +243,7 @@ class Agent:
             return cast(
                 State,
                 {
-                    "messages": [AIMessage(content=with_crisis_resources(str(crisis_reply.content)))],
+                    "messages": [AIMessage(content=with_crisis_resources(self._normalize_content(crisis_reply.content)))],
                     "tool_iterations": 0,
                     "risk": state.get("risk"),
                 },
@@ -475,7 +481,7 @@ class Agent:
         ai_msg = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage)), None)
         if ai_msg is None:
             raise RuntimeError("Agent produced no assistant message.")
-        return str(ai_msg.content)
+        return self._normalize_content(ai_msg.content)
 
     @staticmethod
     def _accumulate_usage(usage_sink: dict | None, message: Any) -> None:
@@ -499,40 +505,58 @@ class Agent:
         Rogerian prompt or trigger the RAG tool.
         """
         result = await self._base_llm.ainvoke(list(messages))
-        return str(result.content)
+        return self._normalize_content(result.content)
 
     async def ainvoke(self, new_message: HumanMessage, thread_id: str, usage_sink: dict | None = None) -> str:
         """Invoke with checkpointer — only pass the new message, history is in checkpoint."""
         config = {"configurable": {"thread_id": thread_id}}
-        result = await self.app.ainvoke({"messages": [new_message]}, config=config)
+        crisis = detect_crisis(self._normalize_content(new_message.content))
+        try:
+            result = await self.app.ainvoke({"messages": [new_message]}, config=config)
+        except Exception:
+            if not crisis:
+                raise
+            # A crisis turn must deliver the referral even when generation
+            # fails — return the resources alone instead of erroring.
+            logger.exception("Generation failed on a crisis turn; returning resources only.")
+            return with_crisis_resources("")
         ai_msg = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage)), None)
         if ai_msg is None:
             raise RuntimeError("Agent produced no assistant message.")
         # Count only the final assistant message: result["messages"] carries the
         # full checkpoint history, so summing all would re-count prior turns.
         self._accumulate_usage(usage_sink, ai_msg)
-        return str(ai_msg.content)
+        return self._normalize_content(ai_msg.content)
 
     async def astream_tokens(self, new_message: HumanMessage, thread_id: str, usage_sink: dict | None = None) -> AsyncGenerator[str, None]:
         """Async generator that yields text tokens as they stream from the LLM."""
         config = {"configurable": {"thread_id": thread_id}}
         crisis = detect_crisis(self._normalize_content(new_message.content))
-        async for event in self.app.astream_events(
-            {"messages": [new_message]},
-            config=config,
-            version="v2",
-        ):
-            # Skip internal LLM calls (e.g. summarization) so their tokens don't
-            # leak into the user-facing stream or the usage count.
-            if "internal" in (event.get("tags") or []):
-                continue
-            etype = event["event"]
-            if etype == "on_chat_model_stream":
-                chunk = event["data"]["chunk"]
-                if chunk.content:
-                    yield str(chunk.content)
-            elif etype == "on_chat_model_end":
-                self._accumulate_usage(usage_sink, event["data"].get("output"))
+        try:
+            async for event in self.app.astream_events(
+                {"messages": [new_message]},
+                config=config,
+                version="v2",
+            ):
+                # Skip internal LLM calls (e.g. summarization) so their tokens don't
+                # leak into the user-facing stream or the usage count.
+                if "internal" in (event.get("tags") or []):
+                    continue
+                etype = event["event"]
+                if etype == "on_chat_model_stream":
+                    # Normalize: Anthropic streams content as a list of blocks;
+                    # str() would emit their Python repr.
+                    text = self._normalize_content(event["data"]["chunk"].content)
+                    if text:
+                        yield text
+                elif etype == "on_chat_model_end":
+                    self._accumulate_usage(usage_sink, event["data"].get("output"))
+        except Exception:
+            if not crisis:
+                raise
+            # A crisis turn must deliver the referral even when generation
+            # fails — swallow the error and emit the resources alone.
+            logger.exception("Generation failed on a crisis turn; sending resources only.")
         # Deterministically append crisis resources so the streamed reply carries
         # the same guaranteed referral as the non-streaming path (see chat node).
         if crisis:

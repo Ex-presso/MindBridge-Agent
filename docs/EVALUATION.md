@@ -397,10 +397,12 @@ A production deployment of this stack would need at minimum:
 
 Items 1–2 above are now in the agent (`app/core/agent/safety.py` +
 a `safety_check` node ahead of `chat`). A deterministic detector flags
-self-harm / harm-to-others turns; flagged turns bypass the Rogerian flow
-and RAG, respond under a crisis prompt, and have the 988 / Crisis Text
-Line / emergency block **appended deterministically** — referral does not
-depend on the model emitting it.
+self-harm turns (4/4 probes) and explicit harm-to-others threats (1/2
+probes — indirect phrasing still falls through to the Rogerian flow);
+flagged turns bypass the Rogerian flow and RAG, respond under a crisis
+prompt, and have the 988 / Crisis Text Line / emergency block **appended
+deterministically** — referral does not depend on the model emitting it,
+and the resources are sent even if generation itself errors.
 
 Validated without the generator model (detection is pure regex, appending
 is deterministic and unit-tested in `backend/tests/test_safety.py`):
