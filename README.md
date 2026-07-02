@@ -1,15 +1,15 @@
 # MindBridge
 
-A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG**. The agent practices Rogerian (person-centered) therapy — reflecting feelings and creating a safe conversational space — and autonomously decides when to retrieve real counselor-style examples ([MentalChat16K](https://huggingface.co/datasets/ShenLab/MentalChat16K)) from a pgvector store. Ships with a five-layer evaluation framework covering retrieval quality, agent tool-routing, generation alignment, judged response quality, and safety.
+A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG**. The agent practices Rogerian (person-centered) therapy by reflecting feelings and creating a safe conversational space. It autonomously decides when to retrieve real counselor-style examples ([MentalChat16K](https://huggingface.co/datasets/ShenLab/MentalChat16K)) from a pgvector store. The project ships with a five-layer evaluation framework covering retrieval quality, agent tool-routing, generation alignment, judged response quality, and safety.
 
 ## Features
 
-- **LangGraph agent with conditional RAG** — the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.909 on a hand-labeled benchmark), with a bounded tool-call loop
-- **Multi-provider, bring-your-own-key** — OpenAI, Anthropic, Google Gemini, plus any OpenAI-/Anthropic-compatible endpoint (Ollama, LM Studio); per-user keys are Fernet-encrypted at rest
-- **Server-side conversation memory** — LangGraph PostgreSQL checkpointer keyed by conversation; clients send only the new message
-- **Real token-level SSE streaming** with optimistic UI updates
-- **JWT auth** — short-lived access tokens + httpOnly refresh cookies, bcrypt hashing
-- **Five-layer evaluation framework** — reproducible, seed-frozen benchmarks; runs fully on local models
+- **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.909 on a hand-labeled benchmark), with a bounded tool-call loop.
+- **Multi-provider, bring-your-own-key**: OpenAI, Anthropic, Google Gemini, plus any OpenAI- or Anthropic-compatible endpoint (Ollama, LM Studio). Per-user keys are Fernet-encrypted at rest.
+- **Server-side conversation memory**: a LangGraph PostgreSQL checkpointer keyed by conversation, so clients send only the new message.
+- **Real token-level SSE streaming** with optimistic UI updates.
+- **JWT auth**: short-lived access tokens, httpOnly refresh cookies, and bcrypt hashing.
+- **Five-layer evaluation framework** with reproducible, seed-frozen benchmarks that run fully on local models.
 
 ## Architecture
 
@@ -48,7 +48,7 @@ cp backend/.env.example backend/.env   # set SECRET_KEY for production
 docker compose up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000), create an account, add your API key under **Settings**, and start chatting. The backend runs at `:8080` — interactive API docs at [http://localhost:8080/docs](http://localhost:8080/docs).
+Open [http://localhost:3000](http://localhost:3000), create an account, add your API key under **Settings**, and start chatting. The backend runs at `:8080`, with interactive API docs at [http://localhost:8080/docs](http://localhost:8080/docs).
 
 <details>
 <summary>Local development without Docker</summary>
@@ -77,9 +77,9 @@ Each layer isolates one variable in the stack. Benchmarks are seed-frozen JSON i
 | Agent routing | Does the agent invoke the RAG tool exactly when it should | F1 = 0.909 (n = 45 scored) |
 | Reference-based | BERTScore (baseline-rescaled) vs MentalChat16K hold-out | F1 = 0.139, cosine = 0.637 (n = 99) |
 | LLM-as-judge | Empathy/safety across 6 prompt × RAG conditions, Wilcoxon + Holm | CBT < Baseline (p = 0.004); Rogerian ≈ Baseline |
-| Safety probes | Crisis-referral / refusal behavior on 20 high-risk probes | **0% crisis-referral on self-harm** — documented production gap |
+| Safety probes | Crisis-referral / refusal behavior on 20 high-risk probes | **0% crisis-referral on self-harm** (documented production gap) |
 
-Two design choices worth noting: the **judge is a different model family than the generator** (same-model self-judging previously produced ceiling scores with zero significant differences), and the safety layer is **diagnostic by design** — it surfaced that the empathy-optimized Rogerian prompt reflects feelings without crisis routing, which any deployment would need to fix first.
+Two design choices are worth noting. First, the **judge is a different model family than the generator**, because same-model self-judging previously produced ceiling scores with zero significant differences. Second, the safety layer is **diagnostic by design**: it surfaced that the empathy-optimized Rogerian prompt reflects feelings without crisis routing, which any deployment would need to fix first.
 
 ```bash
 cd evaluation && uv sync
@@ -90,7 +90,7 @@ python ../analysis/analyze.py                   # regenerate all figures
 ## Project Structure
 
 ```
-backend/        FastAPI app — LangGraph agent, RAG, auth, async SQLAlchemy
+backend/        FastAPI app: LangGraph agent, RAG, auth, async SQLAlchemy
 frontend-next/  Next.js 16 App Router chat UI
 evaluation/     Five eval layers: scripts, YAML configs, frozen benchmarks, results
 analysis/       Figure/table generation from eval results
@@ -100,9 +100,7 @@ legacy/         Retired Gradio frontend
 
 ## Documentation
 
-- [docs/EVALUATION.md](docs/EVALUATION.md) — evaluation methodology, full results, limitations
-- [docs/system_arch.md](docs/system_arch.md) — system architecture and code walkthrough (中文)
-- [docs/develop.md](docs/develop.md) — optimization roadmap (中文)
+- [docs/EVALUATION.md](docs/EVALUATION.md): evaluation methodology, full results, limitations
 
 ## Tech Stack
 
