@@ -2,7 +2,7 @@
 import uuid
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent.agent import Agent
@@ -69,19 +69,20 @@ async def delete_conversation(db: AsyncSession, conv_id: uuid.UUID, user_id: uui
 
 
 async def generate_title(agent: Agent, first_user_message: str) -> str:
-    """Generate a short conversation title from the first user message."""
+    """Generate a short conversation title from the first user message.
+
+    Uses the agent's raw LLM (acomplete) rather than the full graph, so the
+    title request isn't wrapped in the Rogerian system prompt or able to
+    trigger the RAG tool.
+    """
     prompt = f'Summarize this message in 5 words or fewer, as a conversation title. Only return the title, no punctuation: "{first_user_message[:200]}"'
     try:
-        state = {
-            "messages": [
+        title = await agent.acomplete(
+            [
                 SystemMessage(content="You generate short conversation titles."),
                 HumanMessage(content=prompt),
-            ],
-            "tool_iterations": 0,
-        }
-        result = await agent.app.ainvoke(state)
-        ai_msg = next((m for m in reversed(result["messages"]) if hasattr(m, "content") and m.content), None)
-        title = str(ai_msg.content).strip()[:100] if ai_msg else first_user_message[:50]
-        return title
+            ]
+        )
+        return title.strip()[:100] or first_user_message[:50]
     except Exception:
         return first_user_message[:50]

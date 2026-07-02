@@ -27,12 +27,12 @@ async def run_chat_legacy(agent: Agent, history: Sequence[ChatMessage]) -> str:
     return await agent.ainvoke_legacy(messages)
 
 
-async def run_chat_session(agent: Agent, new_message: str, thread_id: str) -> str:
+async def run_chat_session(agent: Agent, new_message: str, thread_id: str, usage_sink: dict | None = None) -> str:
     """Stateful: passes only the new message; history is in the checkpointer."""
-    return await agent.ainvoke(HumanMessage(content=new_message), thread_id=thread_id)
+    return await agent.ainvoke(HumanMessage(content=new_message), thread_id=thread_id, usage_sink=usage_sink)
 
 
-async def stream_chat_session(agent: Agent, new_message: str, thread_id: str) -> AsyncGenerator[str, None]:
+async def stream_chat_session(agent: Agent, new_message: str, thread_id: str, usage_sink: dict | None = None) -> AsyncGenerator[str, None]:
     """Real token streaming for the session-aware endpoint."""
-    async for token in agent.astream_tokens(HumanMessage(content=new_message), thread_id=thread_id):
+    async for token in agent.astream_tokens(HumanMessage(content=new_message), thread_id=thread_id, usage_sink=usage_sink):
         yield token

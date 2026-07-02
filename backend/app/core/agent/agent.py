@@ -16,6 +16,7 @@ from langgraph.graph.message import add_messages
 
 from app.core.llm.provider import get_llm
 from app.services.rag import get_retriever
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,8 @@ class Agent:
         Never provide medical diagnoses, prescribe medication, or offer crisis intervention advice.
         """
 
-        self._rag_top_k = 3
+        self._base_llm = base_llm
+        self._rag_top_k = settings.RAG_TOP_K
         self._tools = self._build_tools()
         self.llm = base_llm.bind_tools(list(self._tools.values()))
         self._system_message = SystemMessage(content=self.system_prompt.strip())
@@ -383,16 +385,43 @@ class Agent:
             raise RuntimeError("Agent produced no assistant message.")
         return str(ai_msg.content)
 
-    async def ainvoke(self, new_message: HumanMessage, thread_id: str) -> str:
+    @staticmethod
+    def _accumulate_usage(usage_sink: dict | None, message: Any) -> None:
+        """Add a message's token usage into usage_sink (input/output/total).
+
+        No-op when the provider didn't report usage_metadata (common for some
+        streaming providers), so tokens_used stays NULL rather than wrong.
+        """
+        if usage_sink is None or message is None:
+            return
+        um = getattr(message, "usage_metadata", None)
+        if not um:
+            return
+        for key, field in (("input", "input_tokens"), ("output", "output_tokens"), ("total", "total_tokens")):
+            usage_sink[key] = usage_sink.get(key, 0) + int(um.get(field, 0) or 0)
+
+    async def acomplete(self, messages: Sequence[BaseMessage]) -> str:
+        """One-shot completion with no tools, graph, or system prompt.
+
+        For side tasks like title generation that must NOT be wrapped in the
+        Rogerian prompt or trigger the RAG tool.
+        """
+        result = await self._base_llm.ainvoke(list(messages))
+        return str(result.content)
+
+    async def ainvoke(self, new_message: HumanMessage, thread_id: str, usage_sink: dict | None = None) -> str:
         """Invoke with checkpointer — only pass the new message, history is in checkpoint."""
         config = {"configurable": {"thread_id": thread_id}}
         result = await self.app.ainvoke({"messages": [new_message]}, config=config)
         ai_msg = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage)), None)
         if ai_msg is None:
             raise RuntimeError("Agent produced no assistant message.")
+        # Count only the final assistant message: result["messages"] carries the
+        # full checkpoint history, so summing all would re-count prior turns.
+        self._accumulate_usage(usage_sink, ai_msg)
         return str(ai_msg.content)
 
-    async def astream_tokens(self, new_message: HumanMessage, thread_id: str) -> AsyncGenerator[str, None]:
+    async def astream_tokens(self, new_message: HumanMessage, thread_id: str, usage_sink: dict | None = None) -> AsyncGenerator[str, None]:
         """Async generator that yields text tokens as they stream from the LLM."""
         config = {"configurable": {"thread_id": thread_id}}
         async for event in self.app.astream_events(
@@ -400,7 +429,10 @@ class Agent:
             config=config,
             version="v2",
         ):
-            if event["event"] == "on_chat_model_stream":
+            etype = event["event"]
+            if etype == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
                 if chunk.content:
                     yield str(chunk.content)
+            elif etype == "on_chat_model_end":
+                self._accumulate_usage(usage_sink, event["data"].get("output"))

@@ -12,8 +12,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: SecretStr | None = None
     MODEL_TEMPERATURE: float = 0.3
 
-    # RAG settings
-    RAG_CHUNK_SIZE: int = 1000
+    # RAG settings. chunk_size=2000 is the IR-benchmark winner (NDCG@5 0.537
+    # vs 0.443 at 1000); overlap had no measurable effect. See docs/EVALUATION.md.
+    RAG_CHUNK_SIZE: int = 2000
     RAG_CHUNK_OVERLAP: int = 100
     RAG_TOP_K: int = 3
 

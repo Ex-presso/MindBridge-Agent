@@ -1,98 +1,85 @@
-"""
-Run all evaluations end-to-end.
+"""Run the full five-layer evaluation suite end-to-end.
+
+Each layer is a standalone script; this driver just sequences them and then
+regenerates figures. Layers are independent — a failure in one is reported and
+the rest still run.
+
+Prerequisites: PostgreSQL (pgvector) up, LM Studio serving the generator (and
+the judge model for the prompting layer). See docs/EVALUATION.md.
 
 Usage:
-    # Full evaluation (slow - all 50 queries × all configs)
-    uv run python -m evaluation.run_all
-
-    # Quick smoke test (3 queries only)
-    uv run python -m evaluation.run_all --quick
-
-    # Custom query count
-    uv run python -m evaluation.run_all --max-queries 10
+    uv run python run_all.py                 # all layers, full size
+    uv run python run_all.py --quick         # 3 queries per layer (smoke test)
+    uv run python run_all.py --build         # (re)build IR indexes first
+    uv run python run_all.py --skip prompting safety
+    uv run python run_all.py --skip-analysis
 """
 
 from __future__ import annotations
 
 import argparse
-import logging
+import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-EVAL_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT / "backend"))
-sys.path.insert(0, str(EVAL_ROOT))
+EVAL_DIR = Path(__file__).resolve().parent
+ANALYZE = EVAL_DIR.parent / "analysis" / "analyze.py"
+
+# name -> (script, supports --max-queries)
+LAYERS: dict[str, tuple[str, bool]] = {
+    "retrieval": ("eval_retrieval.py", False),
+    "routing": ("eval_routing.py", True),
+    "reference": ("eval_reference.py", True),
+    "prompting": ("eval_prompting.py", True),
+    "safety": ("eval_safety.py", True),
+}
 
 
-def main():
+def run_script(script: str, args: list[str]) -> bool:
+    cmd = [sys.executable, str(EVAL_DIR / script), *args]
+    print(f"\n$ {' '.join(cmd)}")
+    return subprocess.run(cmd, cwd=EVAL_DIR).returncode == 0
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run all MindBridge evaluations")
-    parser.add_argument(
-        "--quick",
-        action="store_true",
-        help="Quick mode: only 3 queries for smoke testing",
-    )
-    parser.add_argument(
-        "--max-queries",
-        type=int,
-        default=None,
-        help="Max number of evaluation queries",
-    )
-    parser.add_argument(
-        "--skip-rag",
-        action="store_true",
-        help="Skip RAG parameter evaluation",
-    )
-    parser.add_argument(
-        "--skip-prompting",
-        action="store_true",
-        help="Skip prompting strategy evaluation",
-    )
-    parser.add_argument(
-        "--skip-analysis",
-        action="store_true",
-        help="Skip figure generation (only collect data)",
-    )
+    parser.add_argument("--quick", action="store_true", help="3 queries per layer (smoke test)")
+    parser.add_argument("--max-queries", type=int, default=None, help="Cap queries for layers that support it")
+    parser.add_argument("--build", action="store_true", help="Build IR indexes (retrieval layer) instead of reusing them")
+    parser.add_argument("--skip", nargs="*", default=[], choices=list(LAYERS), help="Layers to skip")
+    parser.add_argument("--skip-analysis", action="store_true", help="Skip figure generation")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    max_queries = 3 if args.quick else args.max_queries
 
-    max_queries = args.max_queries
-    if args.quick:
-        max_queries = 3
+    failures: list[str] = []
+    for name, (script, supports_max) in LAYERS.items():
+        if name in args.skip:
+            print(f"\n=== SKIP {name} ===")
+            continue
+        print(f"\n{'=' * 60}\n{name.upper()}\n{'=' * 60}")
 
-    if not args.skip_rag:
-        print("\n" + "=" * 60)
-        print("PHASE 1: RAG Parameter Evaluation")
-        print("=" * 60)
-        from eval_rag import run_rag_evaluation
+        layer_args: list[str] = []
+        if name == "retrieval" and not args.build:
+            layer_args.append("--no-build")  # reuse existing pgvector collections
+        if supports_max and max_queries:
+            layer_args += ["--max-queries", str(max_queries)]
 
-        run_rag_evaluation(max_queries=max_queries)
-
-    if not args.skip_prompting:
-        print("\n" + "=" * 60)
-        print("PHASE 2: Prompting Strategy Evaluation")
-        print("=" * 60)
-        from eval_prompting import run_prompting_evaluation
-
-        run_prompting_evaluation(max_queries=max_queries)
+        if not run_script(script, layer_args):
+            failures.append(name)
+            print(f"!! {name} failed — continuing with remaining layers")
 
     if not args.skip_analysis:
-        print("\n" + "=" * 60)
-        print("PHASE 3: Analysis & Figure Generation")
-        print("=" * 60)
-        from analyze_results import main as analyze
+        print(f"\n{'=' * 60}\nANALYSIS\n{'=' * 60}")
+        if subprocess.run([sys.executable, str(ANALYZE)]).returncode != 0:
+            failures.append("analysis")
 
-        analyze()
-
-    print("\n" + "=" * 60)
+    print(f"\n{'=' * 60}")
+    if failures:
+        print(f"DONE with failures: {', '.join(failures)}")
+        sys.exit(1)
     print("ALL EVALUATIONS COMPLETE")
-    print("=" * 60)
-    print(f"Results: {ROOT / 'evaluation' / 'results'}")
-    print(f"Figures: {ROOT / 'evaluation' / 'results' / 'figures'}")
+    print(f"Results: {EVAL_DIR / 'results'}   Figures: {ANALYZE.parent / 'pics'}")
 
 
 if __name__ == "__main__":

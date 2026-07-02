@@ -1,13 +1,18 @@
-# Quick smoke test (3 queries, fast)
+#!/usr/bin/env bash
+# Evaluation suite shortcuts. Needs PostgreSQL (pgvector) + LM Studio up.
+# See docs/EVALUATION.md for the full methodology.
+
+# Smoke test — 3 queries per layer
 cd evaluation && uv run python run_all.py --quick
 
-# Full evaluation (all 50 queries × all configs — takes a while)
+# Full run — all five layers + figures
 cd evaluation && uv run python run_all.py
 
-# Run only RAG eval or only prompting eval
-cd evaluation && uv run python run_all.py --skip-prompting
-cd evaluation && uv run python run_all.py --skip-rag
+# (Re)build IR indexes before the retrieval layer
+cd evaluation && uv run python run_all.py --build
 
-# Just regenerate figures from existing results
-cd evaluation && uv run python run_all.py --skip-rag --skip-prompting
+# Skip specific layers
+cd evaluation && uv run python run_all.py --skip prompting safety
 
+# Only regenerate figures from existing result CSVs
+cd evaluation && uv run python ../analysis/analyze.py

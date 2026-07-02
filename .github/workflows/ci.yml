@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      # Critical errors only (syntax, undefined names) — not style — so CI
+      # catches real breakage without churning on formatting.
+      - name: Lint
+        run: uvx ruff check --select E9,F63,F7,F82 backend evaluation analysis
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          uv sync --frozen
+          uv run pytest -q

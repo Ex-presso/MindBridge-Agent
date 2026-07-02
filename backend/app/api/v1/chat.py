@@ -1,4 +1,6 @@
 """Chat endpoints: legacy OpenAI-compatible + new session-aware."""
+import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -25,6 +27,36 @@ from app.services import conversation_service
 from config.settings import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# Cache compiled agents by (provider, model, base_url, key-hash, checkpointer).
+# The LangGraph graph is stateless — per-conversation state lives in the
+# checkpointer — so one agent is safe to reuse across requests and users that
+# share an LLM config. Rebuilding it per request re-binds tools and recompiles
+# the graph for nothing.
+# ponytail: bounded LRU at 128 entries; bump if you serve many model configs.
+import hashlib
+from collections import OrderedDict
+
+_AGENT_CACHE: "OrderedDict[tuple, object]" = OrderedDict()
+_AGENT_CACHE_MAX = 128
+
+
+def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: str, checkpointer):
+    from app.core.agent.agent import Agent
+    from app.core.llm.provider import get_llm
+
+    key = (provider, model, base_url, hashlib.sha256(api_key.encode()).hexdigest(), id(checkpointer))
+    agent = _AGENT_CACHE.get(key)
+    if agent is None:
+        llm = get_llm(provider, api_key=api_key, base_url=base_url, model=model)
+        agent = Agent(llm, checkpointer=checkpointer)
+        _AGENT_CACHE[key] = agent
+        if len(_AGENT_CACHE) > _AGENT_CACHE_MAX:
+            _AGENT_CACHE.popitem(last=False)
+    else:
+        _AGENT_CACHE.move_to_end(key)
+    return agent
 
 
 # ── Legacy endpoint (kept for OpenWebUI / third-party clients) ────────────────
@@ -82,22 +114,14 @@ async def session_chat(
     # Load user's API key for this provider
     from app.db.repositories import api_key_repo
     from app.core.auth.encryption import decrypt_value
-    from app.core.llm.provider import get_llm
-    from app.core.agent.agent import Agent
 
     key_record = await api_key_repo.get_by_provider(db, user.id, provider)
     if key_record is None:
         raise HTTPException(status_code=400, detail=f"No API key configured for provider '{provider}'. Add one in Settings.")
 
     decrypted_key = decrypt_value(key_record.api_key_encrypted)
-    llm = get_llm(
-        provider,
-        api_key=decrypted_key,
-        base_url=key_record.base_url,
-        model=body.model,
-    )
     checkpointer = getattr(request.app.state, "checkpointer", None)
-    agent = Agent(llm, checkpointer=checkpointer)
+    agent = _get_agent(provider, body.model, key_record.base_url, decrypted_key, checkpointer)
 
     # Create or validate conversation
     is_new_conversation = body.conversation_id is None
@@ -123,13 +147,17 @@ async def session_chat(
     if body.stream:
         async def stream_response() -> AsyncGenerator[bytes, None]:
             collected = []
+            usage: dict = {}
             try:
-                async for token in chat_service.stream_chat_session(agent, body.message, thread_id):
+                async for token in chat_service.stream_chat_session(agent, body.message, thread_id, usage_sink=usage):
                     collected.append(token)
-                    data = f"data: {token}\n\n"
-                    yield data.encode()
-            except Exception as exc:
-                yield f"data: [ERROR] {exc}\n\n".encode()
+                    # JSON-encode so tokens containing newlines don't break SSE
+                    # `\n\n` framing (the raw-text version dropped whitespace and
+                    # split multi-line tokens across frames).
+                    yield f"data: {json.dumps({'delta': token})}\n\n".encode()
+            except Exception:
+                logger.exception("Streaming chat failed for conversation %s", conv_id_str)
+                yield f"data: {json.dumps({'error': 'Generation failed.'})}\n\n".encode()
             yield b"data: [DONE]\n\n"
 
             # Save assistant message after streaming completes
@@ -143,6 +171,7 @@ async def session_chat(
                         content=full_reply,
                         model_used=body.model,
                         provider=provider,
+                        tokens_used=usage.get("total"),
                     )
                     await conversation_repo.touch(session, conv.id)
                     if is_new_conversation:
@@ -157,8 +186,9 @@ async def session_chat(
         )
 
     # Non-streaming
+    usage: dict = {}
     try:
-        reply = await chat_service.run_chat_session(agent, body.message, thread_id)
+        reply = await chat_service.run_chat_session(agent, body.message, thread_id, usage_sink=usage)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -170,6 +200,7 @@ async def session_chat(
             content=reply,
             model_used=body.model,
             provider=provider,
+            tokens_used=usage.get("total"),
         )
         await conversation_repo.touch(session, conv.id)
         if is_new_conversation:

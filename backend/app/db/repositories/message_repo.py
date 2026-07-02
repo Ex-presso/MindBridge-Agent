@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.message import Message
 
 
-async def create(db: AsyncSession, *, conversation_id: uuid.UUID, role: str, content: str, model_used: str | None = None, provider: str | None = None) -> Message:
-    msg = Message(conversation_id=conversation_id, role=role, content=content, model_used=model_used, provider=provider)
+async def create(db: AsyncSession, *, conversation_id: uuid.UUID, role: str, content: str, model_used: str | None = None, provider: str | None = None, tokens_used: int | None = None) -> Message:
+    msg = Message(conversation_id=conversation_id, role=role, content=content, model_used=model_used, provider=provider, tokens_used=tokens_used)
     db.add(msg)
     await db.flush()
     await db.refresh(msg)
