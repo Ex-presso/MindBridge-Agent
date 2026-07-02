@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     EMBEDDING_PROVIDER: str = "sentence_transformers"
     EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
     EMBEDDING_BASE_URL: str = "http://localhost:1234/v1"
+    # Query-side instruction for Qwen3-Embedding (applied to queries only, not
+    # documents — the model's trained retrieval format). Measured on the 30-query
+    # IR benchmark it gave NO net gain (generic model-card instruction: +0.9pp
+    # NDCG@5 but -3pp Recall@5/Hit@5; domain-specific wording hurt more), so it's
+    # off by default. Set a non-empty value to re-enable. See docs/EVALUATION.md.
+    EMBEDDING_QUERY_INSTRUCTION: str = ""
 
     # PostgreSQL / pgvector
     DATABASE_URL: str = "postgresql+psycopg://mindbridge:mindbridge_dev@localhost:5432/mindbridge"

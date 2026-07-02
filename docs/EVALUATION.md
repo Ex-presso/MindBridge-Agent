@@ -85,11 +85,44 @@ that query*?
   count as relevant; semantically equivalent chunks from other counselor
   responses are marked irrelevant. So Recall and NDCG under-state real
   usefulness.
-- **No reranker or hybrid (BM25 + dense) tested** — this is the
-  embedding-and-chunking sweep only.
-- **Embedding does not use the Qwen3 query-prompt prefix** (the model
-  card recommends an "Instruct: …" prefix for retrieval). Re-running with
-  the prefix is a known quick-win and will likely raise NDCG@5 by 5–10pp.
+
+### Retrieval-improvement experiments
+
+Four standard IR techniques were tested against the dense baseline on the
+same 30-query benchmark (config `cs=1000, co=100`; dense baseline
+NDCG@5 = 0.429, Recall@5 = 0.471, Hit@5 = 0.767). **None beat dense-only:**
+
+| Technique | NDCG@5 | Recall@5 | Hit@5 | Verdict |
+|-----------|--------|----------|-------|---------|
+| Dense (bi-encoder) | **0.429** | **0.471** | **0.767** | baseline |
+| + Qwen3 query instruction (generic) | 0.437 | 0.443 | 0.733 | ~neutral (−Recall/Hit) |
+| + Qwen3 query instruction (domain) | 0.385 | 0.383 | 0.567 | hurts |
+| BM25 (lexical only) | 0.113 | 0.106 | 0.133 | far weaker |
+| Hybrid BM25 + dense (RRF) | 0.335 | 0.387 | 0.700 | hurts (BM25 pollutes) |
+| Dense + cross-encoder rerank (MS-MARCO) | 0.359 | 0.376 | 0.667 | hurts |
+
+**Why the standard toolkit fails here.** This task matches a *problem*
+(the user's emotional disclosure) to its *complementary response* (the
+counselor's advice), not to a lexically or topically *similar* passage.
+BM25, MS-MARCO cross-encoders, and instruction prefixes are all tuned for
+query–answer *similarity*, so they misjudge the problem→response relation.
+The dense bi-encoder wins because it captures topical relatedness between a
+concern and its counseling domain. The setup is already near-optimal *for
+this class of technique*.
+
+The two techniques that the diagnosis says *should* help both need
+infrastructure not available in this pass:
+- **HyDE query expansion** — generate a hypothetical counselor response to
+  the query, then embed *that* (turning problem→response into
+  response→response matching). Needs a generator LLM.
+- **Input-as-key indexing** — index the user-side `input` as the retrieval
+  key and return the counselor `output` as payload (problem→problem
+  matching). Can't be fairly scored on this benchmark because its queries
+  are drawn from the indexed pool (query would self-match its own key); it
+  needs a hold-out IR benchmark.
+
+Config knob: `EMBEDDING_QUERY_INSTRUCTION` (default off) re-enables the
+query prefix. Reproduce: `evaluation/experiments/retrieval_ablation.py`.
 
 ---
 

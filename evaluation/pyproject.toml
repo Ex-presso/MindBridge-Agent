@@ -24,4 +24,5 @@ dependencies = [
     "tqdm>=4.67.1",
     "sentence-transformers>=4.0.0",
     "bert-score>=0.3.13",
+    "rank-bm25>=0.2.2",
 ]

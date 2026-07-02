@@ -114,7 +114,9 @@ class Agent:
 
         description = (
             "Retrieve counselor-style examples from the mental health knowledge base. "
-            "Call this tool only when the user is asking about emotions, coping strategies, or other mental health topics."
+            "Call this tool only when the user is asking about emotions, coping strategies, or other mental health topics. "
+            "Pass a self-contained `query` that captures the user's concern in full — resolve pronouns and references to "
+            "earlier messages (e.g. 'it', 'that') so the query stands on its own for retrieval."
         )
 
         rag_tool = StructuredTool.from_function(

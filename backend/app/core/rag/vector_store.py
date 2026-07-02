@@ -29,16 +29,30 @@ def get_embeddings() -> Embeddings:
         from sentence_transformers import SentenceTransformer
 
         class SentenceTransformerEmbeddings(BaseEmbeddings):
-            def __init__(self, model_name: str):
+            """Qwen3-Embedding wrapper with asymmetric query instruction.
+
+            Qwen3-Embedding is trained for retrieval with an "Instruct: …\\nQuery: …"
+            prefix on the *query* side only; documents are embedded plain. Applying
+            it lifts retrieval quality with no reindex (documents are unchanged).
+            Set EMBEDDING_QUERY_INSTRUCTION="" to disable (e.g. for a non-instruct
+            embedding model).
+            """
+
+            def __init__(self, model_name: str, query_instruction: str):
                 self._model = SentenceTransformer(model_name)
+                self._query_instruction = query_instruction
 
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
                 return self._model.encode(texts, show_progress_bar=len(texts) > 50).tolist()
 
             def embed_query(self, text: str) -> list[float]:
+                if self._query_instruction:
+                    text = f"Instruct: {self._query_instruction}\nQuery: {text}"
                 return self._model.encode(text).tolist()
 
-        return SentenceTransformerEmbeddings(settings.EMBEDDING_MODEL)
+        return SentenceTransformerEmbeddings(
+            settings.EMBEDDING_MODEL, settings.EMBEDDING_QUERY_INSTRUCTION
+        )
 
     elif provider == "local":
         from langchain_openai import OpenAIEmbeddings
