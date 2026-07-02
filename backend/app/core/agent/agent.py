@@ -6,6 +6,7 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    RemoveMessage,
     SystemMessage,
     ToolCall,
     ToolMessage,
@@ -14,6 +15,12 @@ from langchain_core.tools import StructuredTool
 from langgraph.graph import START, END, StateGraph
 from langgraph.graph.message import add_messages
 
+from app.core.agent.safety import (
+    CRISIS_RESOURCES,
+    CRISIS_SYSTEM_PROMPT,
+    detect_crisis,
+    with_crisis_resources,
+)
 from app.core.llm.provider import get_llm
 from app.services.rag import get_retriever
 from config.settings import settings
@@ -26,6 +33,8 @@ class State(TypedDict):
 
     messages: Annotated[list[BaseMessage], add_messages]
     tool_iterations: int
+    risk: str | None  # crisis category set by the safety_check node, else None
+    summary: str  # running summary of pruned older turns (long-context mgmt)
 
 
 class Agent:
@@ -116,6 +125,62 @@ class Agent:
 
         return {rag_tool.name: rag_tool}
 
+    async def _safety_check_node(self, state: State) -> State:
+        """Flag the latest user turn as a crisis (self-harm / harm-to-others).
+
+        Runs once per user turn, before chat. Deterministic — no LLM — so it
+        can't be talked out of routing by the model.
+        """
+        last_user = next(
+            (m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+            None,
+        )
+        risk = detect_crisis(self._normalize_content(last_user.content)) if last_user else None
+        if risk:
+            logger.warning("Crisis detected in user turn: category=%s", risk)
+        return cast(State, {"risk": risk})
+
+    async def _summarize_node(self, state: State) -> State:
+        """Fold older turns into a running summary once history grows large.
+
+        Keeps the last SUMMARY_KEEP_RECENT messages verbatim; everything older is
+        summarized and pruned (RemoveMessage) so the context window stays bounded
+        on long conversations. No-op below the trigger. The summary LLM call is
+        tagged "internal" so its tokens are filtered out of the chat stream.
+        """
+        messages = state["messages"]
+        convo = [m for m in messages if isinstance(m, (HumanMessage, AIMessage))]
+        keep = settings.SUMMARY_KEEP_RECENT
+        if len(convo) <= settings.SUMMARY_TRIGGER_MESSAGES or keep <= 0:
+            return cast(State, {})
+
+        to_summarize = [m for m in messages[:-keep] if isinstance(m, (HumanMessage, AIMessage))]
+        prunable = [m for m in messages[:-keep] if getattr(m, "id", None)]
+        if not to_summarize:
+            return cast(State, {})
+
+        prior = state.get("summary") or ""
+        transcript = "\n".join(
+            f"{'User' if isinstance(m, HumanMessage) else 'Assistant'}: {self._normalize_content(m.content)}"
+            for m in to_summarize
+        )
+        prompt = (
+            "Summarize this therapy conversation in 3-5 sentences, preserving the "
+            "user's key concerns, feelings, and any progress made.\n"
+            + (f"\nExisting summary to extend:\n{prior}\n" if prior else "")
+            + f"\nConversation:\n{transcript}"
+        )
+        summary_llm = self._base_llm.with_config(tags=["internal"])
+        result = await summary_llm.ainvoke([HumanMessage(content=prompt)])
+
+        return cast(
+            State,
+            {
+                "summary": str(result.content).strip(),
+                "messages": [RemoveMessage(id=m.id) for m in prunable],
+            },
+        )
+
     async def _chat_node(self, state: State) -> State:
         messages = list(state["messages"])
         has_user_message = any(isinstance(msg, HumanMessage) for msg in messages)
@@ -159,6 +224,23 @@ class Agent:
 
         last_user_msg = cast(HumanMessage, messages[last_user_index])
         normalized_user = self._normalize_content(last_user_msg.content)
+
+        # Crisis turns bypass the Rogerian flow and the RAG tool: generate a
+        # brief empathic reply under the crisis prompt, then deterministically
+        # append crisis resources so referral is guaranteed regardless of model.
+        if state.get("risk"):
+            crisis_reply = await self._base_llm.ainvoke(
+                [SystemMessage(content=CRISIS_SYSTEM_PROMPT), HumanMessage(content=normalized_user)]
+            )
+            return cast(
+                State,
+                {
+                    "messages": [AIMessage(content=with_crisis_resources(str(crisis_reply.content)))],
+                    "tool_iterations": 0,
+                    "risk": state.get("risk"),
+                },
+            )
+
         is_related = self._is_mental_health_related(normalized_user)
         augmented_user = HumanMessage(
             content=self._augment_user_message(normalized_user, is_related=is_related)
@@ -167,7 +249,11 @@ class Agent:
         working_messages = list(messages)
         working_messages[last_user_index] = augmented_user
 
-        llm_input: list[BaseMessage] = [self._system_message, *working_messages]
+        llm_input: list[BaseMessage] = [self._system_message]
+        summary = state.get("summary")
+        if summary:
+            llm_input.append(SystemMessage(content=f"Summary of earlier conversation: {summary}"))
+        llm_input.extend(working_messages)
 
         response = await self.llm.ainvoke(llm_input)
         return cast(
@@ -354,9 +440,13 @@ class Agent:
 
     def _build_graph(self) -> StateGraph:
         graph = StateGraph(State)
+        graph.add_node("safety_check", self._safety_check_node)
+        graph.add_node("summarize", self._summarize_node)
         graph.add_node("chat", self._chat_node)
         graph.add_node("use_tool", self._tool_node)
-        graph.add_edge(START, "chat")
+        graph.add_edge(START, "safety_check")
+        graph.add_edge("safety_check", "summarize")
+        graph.add_edge("summarize", "chat")
         graph.add_conditional_edges(
             "chat",
             self._route_from_chat,
@@ -424,11 +514,16 @@ class Agent:
     async def astream_tokens(self, new_message: HumanMessage, thread_id: str, usage_sink: dict | None = None) -> AsyncGenerator[str, None]:
         """Async generator that yields text tokens as they stream from the LLM."""
         config = {"configurable": {"thread_id": thread_id}}
+        crisis = detect_crisis(self._normalize_content(new_message.content))
         async for event in self.app.astream_events(
             {"messages": [new_message]},
             config=config,
             version="v2",
         ):
+            # Skip internal LLM calls (e.g. summarization) so their tokens don't
+            # leak into the user-facing stream or the usage count.
+            if "internal" in (event.get("tags") or []):
+                continue
             etype = event["event"]
             if etype == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
@@ -436,3 +531,7 @@ class Agent:
                     yield str(chunk.content)
             elif etype == "on_chat_model_end":
                 self._accumulate_usage(usage_sink, event["data"].get("output"))
+        # Deterministically append crisis resources so the streamed reply carries
+        # the same guaranteed referral as the non-streaming path (see chat node).
+        if crisis:
+            yield f"\n\n{CRISIS_RESOURCES}"

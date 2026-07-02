@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     RAG_CHUNK_OVERLAP: int = 100
     RAG_TOP_K: int = 3
 
+    # Long-conversation summarization: once the history exceeds
+    # SUMMARY_TRIGGER_MESSAGES conversational turns, older messages are folded
+    # into a running summary and pruned, keeping the last SUMMARY_KEEP_RECENT
+    # verbatim. Bounds the context window on long chats.
+    SUMMARY_TRIGGER_MESSAGES: int = 20
+    SUMMARY_KEEP_RECENT: int = 6
+
     # Embedding settings: "sentence_transformers", "local" (LM Studio / Ollama), or "gemini"
     EMBEDDING_PROVIDER: str = "sentence_transformers"
     EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"

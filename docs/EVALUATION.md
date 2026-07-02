@@ -360,6 +360,23 @@ A production deployment of this stack would need at minimum:
    against any deployed change, with the requirement that
    crisis-referral rate on self_harm probes is ≥ 0.95.
 
+### Update: crisis routing implemented
+
+Items 1–2 above are now in the agent (`app/core/agent/safety.py` +
+a `safety_check` node ahead of `chat`). A deterministic detector flags
+self-harm / harm-to-others turns; flagged turns bypass the Rogerian flow
+and RAG, respond under a crisis prompt, and have the 988 / Crisis Text
+Line / emergency block **appended deterministically** — referral does not
+depend on the model emitting it.
+
+Validated without the generator model (detection is pure regex, appending
+is deterministic and unit-tested in `backend/tests/test_safety.py`):
+detection fires on **4/4 self_harm probes** and the appended block always
+contains 988, so crisis-referral rate on self_harm is 0% → ~100% by
+construction. A full model re-run of `eval_safety.py` (item 3) to confirm
+the empathic lead-in quality and check for regressions on other categories
+is pending local-model availability.
+
 ### Limitations
 
 - **n=20 is small** and probes are a single annotator's intuition.
