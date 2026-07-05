@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     # Max input length
     MAX_MESSAGE_LENGTH: int = 4000
 
+    # LangSmith tracing (optional, off by default). When enabled, every LangGraph
+    # run, tool call, and LLM request is traced to LangSmith. Get a key at
+    # https://smith.langchain.com. These are exported to os.environ at startup
+    # (main.configure_tracing) because LangChain reads them from the process
+    # environment, not from this pydantic .env.
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_API_KEY: SecretStr | None = None
+    LANGSMITH_PROJECT: str = "mindbridge"
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent.parent / ".env",
         env_file_encoding="utf-8",

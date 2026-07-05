@@ -47,7 +47,29 @@ def configure_logging() -> None:
         root_logger.addHandler(handler)
 
 
+def configure_tracing() -> None:
+    """Export LangSmith settings to os.environ so LangChain/LangGraph pick them up.
+
+    LangChain reads tracing config from the process environment, but this app
+    loads config via pydantic .env (which does not populate os.environ), so we
+    bridge it here. Works for both local dev and Docker. No-op when disabled.
+    """
+    if not settings.LANGSMITH_TRACING:
+        return
+    import os
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
+    os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
+    if settings.LANGSMITH_API_KEY:
+        os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY.get_secret_value()
+    else:
+        logging.getLogger(__name__).warning(
+            "LANGSMITH_TRACING is on but LANGSMITH_API_KEY is unset; traces won't be sent."
+        )
+
+
 configure_logging()
+configure_tracing()
 logger = logging.getLogger(__name__)
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
