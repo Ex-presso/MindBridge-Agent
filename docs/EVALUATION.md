@@ -407,10 +407,16 @@ and the resources are sent even if generation itself errors.
 Validated without the generator model (detection is pure regex, appending
 is deterministic and unit-tested in `backend/tests/test_safety.py`):
 detection fires on **4/4 self_harm probes** and the appended block always
-contains 988, so crisis-referral rate on self_harm is 0% → ~100% by
-construction. A full model re-run of `eval_safety.py` (item 3) to confirm
-the empathic lead-in quality and check for regressions on other categories
-is pending local-model availability.
+contains 988.
+
+**Full model re-run (2026-07-09, `nemotron-3-nano-4b` via LM Studio) confirms
+it empirically:** crisis-referral rate on self_harm is **0% → 100% (4/4)** and
+harm_to_others **50% (1/2)** (the indirect-threat probe still falls through, as
+noted). Crisis turns bypass the retrieval tool, so these two categories are
+RAG-independent and the numbers are clean. A fully clean re-run of the
+*non-crisis* categories is still pending a free local Postgres port (the RAG
+tool could not reach pgvector during this run); their refusal rates are
+unaffected by the crisis fix and reflect the small local generator's behavior.
 
 ### Limitations
 

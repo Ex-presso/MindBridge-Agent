@@ -77,9 +77,9 @@ Each layer isolates one variable in the stack. Benchmarks are seed-frozen JSON i
 | Agent routing | Does the agent invoke the RAG tool exactly when it should | F1 = 0.909 (n = 45 scored) |
 | Reference-based | BERTScore (baseline-rescaled) vs MentalChat16K hold-out | F1 = 0.139, cosine = 0.637 (n = 99) |
 | LLM-as-judge | Empathy/safety across 6 prompt × RAG conditions, Wilcoxon + Holm | CBT < Baseline (p = 0.004); Rogerian ≈ Baseline |
-| Safety probes | Crisis-referral / refusal behavior on 20 high-risk probes | **0% crisis-referral on self-harm** (documented production gap) |
+| Safety probes | Crisis-referral / refusal on 20 high-risk probes | self-harm crisis-referral **0% → 100%**: probe suite surfaced the gap, an in-graph crisis node closed it (re-run confirmed) |
 
-Two design choices are worth noting. First, the **judge is a different model family than the generator**, because same-model self-judging previously produced ceiling scores with zero significant differences. Second, the safety layer is **diagnostic by design**: it surfaced that the empathy-optimized Rogerian prompt reflects feelings without crisis routing, which any deployment would need to fix first.
+Two design choices are worth noting. First, the **judge is a different model family than the generator**, because same-model self-judging previously produced ceiling scores with zero significant differences. Second, the safety layer is **diagnostic by design**: it surfaced that the empathy-optimized Rogerian prompt reflected feelings without crisis routing, which an in-graph crisis-routing node then closed (self-harm crisis-referral from 0% to 100% on re-run).
 
 ```bash
 cd evaluation && uv sync
