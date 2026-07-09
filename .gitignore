@@ -49,7 +49,8 @@ Thumbs.db
 
 # Agent documentation
 AGENTS.md
-.claude/    
+CLAUDE.md
+.claude/
 
 # Index for RAG
 backend/data/MentalChat16K_faiss_index/
@@ -65,3 +66,4 @@ backend/data/MentalChat16K_faiss_index/
 product_plan.md
 docs/develop.md
 docs/system_arch.md
+docs/memory_design.md
