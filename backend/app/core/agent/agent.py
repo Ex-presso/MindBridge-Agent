@@ -27,6 +27,24 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+try:  # tiktoken is a transitive dep (langchain-openai); chars/4 fallback if it can't load
+    import tiktoken
+    _ENCODER = tiktoken.get_encoding("cl100k_base")
+except Exception:  # pragma: no cover - present in this project; degrade gracefully offline
+    _ENCODER = None
+
+_MICRO_PLACEHOLDER = "[Earlier tool result compacted. Re-run the tool if needed.]"
+
+
+def _count_tokens(text: str) -> int:
+    """Rough token count for compaction thresholds: tiktoken if available, else chars/4.
+    Exact accuracy isn't needed — this only gates when to compact."""
+    if not text:
+        return 0
+    if _ENCODER is not None:
+        return len(_ENCODER.encode(text, disallowed_special=()))
+    return len(text) // 4
+
 
 class State(TypedDict):
     """State container for the LangGraph chat flow."""
@@ -143,31 +161,49 @@ class Agent:
         return cast(State, {"risk": risk})
 
     async def _summarize_node(self, state: State) -> State:
-        """Fold older turns into a running summary once history grows large.
+        """Token-based working-memory compaction (Claude Code autoCompact style).
 
-        Keeps the last SUMMARY_KEEP_RECENT messages verbatim; everything older is
-        summarized and pruned (RemoveMessage) so the context window stays bounded
-        on long conversations. No-op below the trigger. The summary LLM call is
-        tagged "internal" so its tokens are filtered out of the chat stream.
+        No-op until the estimated token count of the working context exceeds
+        COMPACT_TRIGGER_TOKENS. Then cheap-first: microCompact old tool results
+        (re-derivable -> placeholder); if that alone gets us back under budget, stop
+        there without an LLM call. Otherwise fold older turns into a running summary
+        and prune them (RemoveMessage), keeping ~COMPACT_KEEP_RECENT_TOKENS of recent
+        turns verbatim. The cut snaps to a HumanMessage boundary so a tool exchange
+        (AIMessage.tool_calls + its ToolMessage) is never split. The summary LLM call
+        is tagged "internal" so its tokens are filtered out of the chat stream.
         """
         messages = state["messages"]
-        convo = [m for m in messages if isinstance(m, (HumanMessage, AIMessage))]
-        keep = settings.SUMMARY_KEEP_RECENT
-        if len(convo) <= settings.SUMMARY_TRIGGER_MESSAGES or keep <= 0:
+        summary = state.get("summary")
+        if self._estimate_tokens(messages, summary) <= settings.COMPACT_TRIGGER_TOKENS:
             return cast(State, {})
 
-        # Snap the cut to a HumanMessage boundary so a tool exchange
-        # (AIMessage.tool_calls + its ToolMessage) is never split — providers
-        # reject a history that opens with an orphaned tool message.
-        cut = len(messages) - keep
-        while cut > 0 and not isinstance(messages[cut], HumanMessage):
-            cut -= 1
-        to_summarize = [m for m in messages[:cut] if isinstance(m, (HumanMessage, AIMessage))]
-        prunable = [m for m in messages[:cut] if getattr(m, "id", None)]
+        # L1 (cheap, no LLM): compact old tool results — maybe that's enough.
+        micro, reclaimed = self._micro_compact(messages)
+        if micro and self._estimate_tokens(messages, summary) - reclaimed <= settings.COMPACT_TRIGGER_TOKENS:
+            return cast(State, {"messages": micro})
+
+        # L2 (expensive): summarize + prune older turns, keeping a recent token budget.
+        keep_from = len(messages)
+        acc = 0
+        while keep_from > 0:
+            acc += _count_tokens(self._normalize_content(messages[keep_from - 1].content))
+            if acc > settings.COMPACT_KEEP_RECENT_TOKENS:
+                break
+            keep_from -= 1
+        # Snap back to a HumanMessage so the kept window can't open on an orphaned
+        # ToolMessage (providers reject that).
+        while keep_from > 0 and not isinstance(messages[keep_from], HumanMessage):
+            keep_from -= 1
+
+        older = messages[:keep_from]
+        to_summarize = [m for m in older if isinstance(m, (HumanMessage, AIMessage))]
+        prunable = [m for m in older if getattr(m, "id", None)]
         if not to_summarize:
-            return cast(State, {})
+            # Nothing old enough to summarize (e.g. one oversized recent message);
+            # fall back to whatever microCompact could reclaim.
+            return cast(State, {"messages": micro} if micro else {})
 
-        prior = state.get("summary") or ""
+        prior = summary or ""
         transcript = "\n".join(
             f"{'User' if isinstance(m, HumanMessage) else 'Assistant'}: {self._normalize_content(m.content)}"
             for m in to_summarize
@@ -188,6 +224,37 @@ class Agent:
                 "messages": [RemoveMessage(id=m.id) for m in prunable],
             },
         )
+
+    def _estimate_tokens(self, messages: list[BaseMessage], summary: str | None = None) -> int:
+        """Estimated token count of the working context (messages + running summary)."""
+        total = _count_tokens(summary or "")
+        for m in messages:
+            total += _count_tokens(self._normalize_content(m.content))
+        return total
+
+    def _micro_compact(self, messages: list[BaseMessage]) -> tuple[list[BaseMessage], int]:
+        """Cheap compaction layer (no LLM): replace old ToolMessage contents with a
+        placeholder, keeping the last COMPACT_MICRO_KEEP_RESULTS verbatim. Tool results
+        are re-derivable (the model can re-call the tool), so this reclaims tokens for
+        free before we pay for LLM summarization — the s08 "cheap first" idea.
+
+        Returns (replacement ToolMessages keyed by the existing id so add_messages
+        overwrites them in place, estimated tokens reclaimed).
+        """
+        tool_msgs = [m for m in messages if isinstance(m, ToolMessage)]
+        keep = settings.COMPACT_MICRO_KEEP_RESULTS
+        older = tool_msgs[:-keep] if keep > 0 else tool_msgs
+        replacements: list[BaseMessage] = []
+        reclaimed = 0
+        placeholder_tokens = _count_tokens(_MICRO_PLACEHOLDER)
+        for m in older:
+            content = self._normalize_content(m.content)
+            if len(content) > settings.COMPACT_MICRO_MIN_CHARS and content != _MICRO_PLACEHOLDER:
+                replacements.append(
+                    ToolMessage(content=_MICRO_PLACEHOLDER, tool_call_id=m.tool_call_id, id=m.id)
+                )
+                reclaimed += _count_tokens(content) - placeholder_tokens
+        return replacements, reclaimed
 
     async def _chat_node(self, state: State) -> State:
         messages = list(state["messages"])

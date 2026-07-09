@@ -18,12 +18,16 @@ class Settings(BaseSettings):
     RAG_CHUNK_OVERLAP: int = 100
     RAG_TOP_K: int = 3
 
-    # Long-conversation summarization: once the history exceeds
-    # SUMMARY_TRIGGER_MESSAGES conversational turns, older messages are folded
-    # into a running summary and pruned, keeping the last SUMMARY_KEEP_RECENT
-    # verbatim. Bounds the context window on long chats.
-    SUMMARY_TRIGGER_MESSAGES: int = 20
-    SUMMARY_KEEP_RECENT: int = 6
+    # Long-conversation working-memory compaction (token-based, Claude Code
+    # autoCompact style; was message-count). Once the estimated token count of the
+    # working context exceeds COMPACT_TRIGGER_TOKENS, fold older turns into a running
+    # summary and prune them, keeping ~COMPACT_KEEP_RECENT_TOKENS of recent turns
+    # verbatim. Cheap-first: microCompact replaces old (re-derivable) tool results
+    # with a placeholder before paying for LLM summarization. See docs/memory_design.md §5.2.
+    COMPACT_TRIGGER_TOKENS: int = 6000
+    COMPACT_KEEP_RECENT_TOKENS: int = 2000
+    COMPACT_MICRO_KEEP_RESULTS: int = 3    # keep the last N tool results verbatim
+    COMPACT_MICRO_MIN_CHARS: int = 120     # only compact tool results longer than this
 
     # Embedding settings: "sentence_transformers", "local" (LM Studio / Ollama), or "gemini"
     EMBEDDING_PROVIDER: str = "sentence_transformers"
