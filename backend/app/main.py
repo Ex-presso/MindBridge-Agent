@@ -104,6 +104,16 @@ async def lifespan(app: FastAPI):
     app.state.checkpointer = checkpointer
     app.state.pg_pool = pool
 
+    # 2b. LangGraph Store: long-term, cross-thread memory (user profile / episodes)
+    #     keyed by user_id, complementing the checkpointer (short-term, per-thread).
+    #     KV-only scaffolding for now; the vector index for episode search is added
+    #     with the Selection node (docs/memory_design.md §5.3). Reuses the pool.
+    from langgraph.store.postgres.aio import AsyncPostgresStore
+
+    store = AsyncPostgresStore(pool)
+    await store.setup()  # creates the store tables (idempotent)
+    app.state.store = store
+
     # 3. Create system agents (only for providers with keys in .env — used by legacy endpoint)
     from app.core.agent.agent import Agent
     app.state.stateless_agents = {}
@@ -112,7 +122,7 @@ async def lifespan(app: FastAPI):
     if settings.OPENAI_API_KEY:
         try:
             app.state.stateless_agents["openai"] = Agent("openai", checkpointer=None)
-            app.state.stateful_agents["openai"] = Agent("openai", checkpointer=checkpointer)
+            app.state.stateful_agents["openai"] = Agent("openai", checkpointer=checkpointer, store=store)
             logger.info("OpenAI system agent created.")
         except Exception as e:
             logger.warning("Failed to create OpenAI agent: %s", e)
@@ -120,7 +130,7 @@ async def lifespan(app: FastAPI):
     if settings.GEMINI_API_KEY:
         try:
             app.state.stateless_agents["google_genai"] = Agent("google_genai", checkpointer=None)
-            app.state.stateful_agents["google_genai"] = Agent("google_genai", checkpointer=checkpointer)
+            app.state.stateful_agents["google_genai"] = Agent("google_genai", checkpointer=checkpointer, store=store)
             logger.info("Google GenAI system agent created.")
         except Exception as e:
             logger.warning("Failed to create Google agent: %s", e)

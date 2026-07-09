@@ -58,7 +58,7 @@ class State(TypedDict):
 class Agent:
     """LangGraph-driven mental health agent with conditional RAG tool usage."""
 
-    def __init__(self, provider_or_llm, checkpointer=None):
+    def __init__(self, provider_or_llm, checkpointer=None, store=None):
         from langchain_core.language_models.chat_models import BaseChatModel
         if isinstance(provider_or_llm, str):
             base_llm = get_llm(provider_or_llm)
@@ -93,7 +93,8 @@ class Agent:
             "to share how they are feeling instead of answering the unrelated question."
         )
 
-        self.app = self._build_graph().compile(checkpointer=checkpointer)
+        self._store = store  # LangGraph long-term memory (cross-thread); unused until memory nodes land
+        self.app = self._build_graph().compile(checkpointer=checkpointer, store=store)
 
     def _build_tools(self) -> dict[str, StructuredTool]:
         """Create the tool set exposed to the LLM."""

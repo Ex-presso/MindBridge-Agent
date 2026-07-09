@@ -42,15 +42,15 @@ _AGENT_CACHE: "OrderedDict[tuple, object]" = OrderedDict()
 _AGENT_CACHE_MAX = 128
 
 
-def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: str, checkpointer):
+def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: str, checkpointer, store=None):
     from app.core.agent.agent import Agent
     from app.core.llm.provider import get_llm
 
-    key = (provider, model, base_url, hashlib.sha256(api_key.encode()).hexdigest(), id(checkpointer))
+    key = (provider, model, base_url, hashlib.sha256(api_key.encode()).hexdigest(), id(checkpointer), id(store))
     agent = _AGENT_CACHE.get(key)
     if agent is None:
         llm = get_llm(provider, api_key=api_key, base_url=base_url, model=model)
-        agent = Agent(llm, checkpointer=checkpointer)
+        agent = Agent(llm, checkpointer=checkpointer, store=store)
         _AGENT_CACHE[key] = agent
         if len(_AGENT_CACHE) > _AGENT_CACHE_MAX:
             _AGENT_CACHE.popitem(last=False)
@@ -124,7 +124,8 @@ async def session_chat(
 
     decrypted_key = decrypt_value(key_record.api_key_encrypted)
     checkpointer = getattr(request.app.state, "checkpointer", None)
-    agent = _get_agent(provider, body.model, key_record.base_url, decrypted_key, checkpointer)
+    store = getattr(request.app.state, "store", None)
+    agent = _get_agent(provider, body.model, key_record.base_url, decrypted_key, checkpointer, store)
 
     # Create or validate conversation
     is_new_conversation = body.conversation_id is None
