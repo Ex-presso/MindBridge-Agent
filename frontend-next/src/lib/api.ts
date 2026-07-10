@@ -1,5 +1,14 @@
 import { useAuthStore } from "@/stores/authStore";
-import type { ApiKeyConfig, Conversation, ConversationDetail, ProviderModels, User } from "@/types";
+import type {
+  ApiKeyConfig,
+  Conversation,
+  ConversationDetail,
+  MemoryDelete,
+  MemoryList,
+  MemoryStatus,
+  ProviderModels,
+  User,
+} from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -89,5 +98,15 @@ export const api = {
     delete: (provider: string) =>
       request<void>(`/api/v1/api-keys/${provider}`, { method: "DELETE" }),
     models: () => request<ProviderModels[]>("/api/v1/api-keys/models"),
+  },
+  memory: {
+    get: (limit = 50, offset = 0) =>
+      request<MemoryList>(`/api/v1/memory?limit=${limit}&offset=${offset}`),
+    toggle: (memoryEnabled: boolean) =>
+      request<MemoryStatus>("/api/v1/memory", {
+        method: "PATCH",
+        body: JSON.stringify({ memory_enabled: memoryEnabled }),
+      }),
+    clear: () => request<MemoryDelete>("/api/v1/memory", { method: "DELETE" }),
   },
 };

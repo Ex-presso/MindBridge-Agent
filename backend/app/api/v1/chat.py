@@ -59,6 +59,36 @@ def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: 
     return agent
 
 
+async def _save_generated_title_if_present(
+    request: Request,
+    agent,
+    conversation_id: uuid.UUID,
+    user_id: uuid.UUID,
+    first_user_message: str,
+) -> None:
+    """Best-effort title generation that never changes the chat result."""
+    try:
+        title = await conversation_service.generate_title(agent, first_user_message)
+        async with request.app.state.db_session() as session:
+            async with session.begin():
+                conv = await conversation_repo.get_owned_for_update(
+                    session,
+                    conversation_id,
+                    user_id,
+                )
+                if conv is not None:
+                    await conversation_repo.update_title(
+                        session,
+                        conversation_id,
+                        title,
+                    )
+    except Exception:
+        logger.exception(
+            "Conversation title update failed for conversation %s",
+            conversation_id,
+        )
+
+
 # ── Legacy endpoint (kept for OpenWebUI / third-party clients) ────────────────
 
 @router.post("/chat/completions")
@@ -136,8 +166,11 @@ async def session_chat(
             conv_id = uuid.UUID(body.conversation_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid conversation_id.")
-        conv = await conversation_repo.get_by_id(db, conv_id)
-        if conv is None or conv.user_id != user.id:
+        # Serialize the initial ownership check and user-message insert with
+        # deletion. Without this lock, deletion can commit after validation but
+        # before the message flush, turning a normal race into an FK error.
+        conv = await conversation_repo.get_owned_for_update(db, conv_id, user.id)
+        if conv is None:
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
     # Save user message
@@ -150,44 +183,85 @@ async def session_chat(
 
     if body.stream:
         async def stream_response() -> AsyncGenerator[bytes, None]:
-            collected = []
+            collected: list[str] = []
             usage: dict = {}
-            try:
-                async for token in chat_service.stream_chat_session(agent, body.message, thread_id, usage_sink=usage):
-                    collected.append(token)
-                    # JSON-encode so tokens containing newlines don't break SSE
-                    # `\n\n` framing (the raw-text version dropped whitespace and
-                    # split multi-line tokens across frames).
-                    yield f"data: {json.dumps({'delta': token})}\n\n".encode()
-            except Exception:
-                logger.exception("Streaming chat failed for conversation %s", conv_id_str)
-                yield f"data: {json.dumps({'error': 'Generation failed.'})}\n\n".encode()
-            yield b"data: [DONE]\n\n"
+            completed = False
+            missing = False
+            generation_failed = False
+            full_reply = ""
 
-            # Save assistant message after streaming completes
-            full_reply = "".join(collected)
-            if full_reply:
-                async with request.app.state.db_session() as session:
-                    await message_repo.create(
-                        session,
-                        conversation_id=conv.id,
-                        role="assistant",
-                        content=full_reply,
-                        model_used=body.model,
-                        provider=provider,
-                        tokens_used=usage.get("total"),
+            try:
+                # Hold a PostgreSQL row lock for the graph run. Conversation
+                # deletion takes the same lock, so it cannot delete a checkpoint
+                # that an in-flight run later recreates.
+                try:
+                    async with request.app.state.db_session() as session:
+                        async with session.begin():
+                            locked_conv = await conversation_repo.get_owned_for_update(
+                                session,
+                                conv.id,
+                                user.id,
+                            )
+                            if locked_conv is None:
+                                missing = True
+                            else:
+                                async for token in chat_service.stream_chat_session(
+                                    agent,
+                                    body.message,
+                                    thread_id,
+                                    usage_sink=usage,
+                                ):
+                                    collected.append(token)
+                                    # JSON-encode so token newlines cannot break
+                                    # the SSE frame delimiter.
+                                    yield f"data: {json.dumps({'delta': token})}\n\n".encode()
+                                completed = True
+
+                                full_reply = "".join(collected)
+                                if full_reply:
+                                    await message_repo.create(
+                                        session,
+                                        conversation_id=conv.id,
+                                        role="assistant",
+                                        content=full_reply,
+                                        model_used=body.model,
+                                        provider=provider,
+                                        tokens_used=usage.get("total"),
+                                    )
+                                    await conversation_repo.touch(session, conv.id)
+                except Exception:
+                    generation_failed = True
+                    logger.exception(
+                        "Streaming chat generation or persistence failed for conversation %s",
+                        conv_id_str,
                     )
-                    await conversation_repo.touch(session, conv.id)
-                    if is_new_conversation:
-                        title = await conversation_service.generate_title(agent, body.message)
-                        await conversation_repo.update_title(session, conv.id, title)
-                    await session.commit()
-            # Request-level observability. A tracer (Langfuse/LangSmith) is the
-            # drop-in upgrade; this line already backs a latency/cost panel.
-            logger.info(
-                "chat stream: conv=%s provider=%s model=%s tokens=%s latency=%.2fs",
-                conv_id_str, provider, body.model, usage.get("total"), time.time() - t_start,
-            )
+
+                if missing:
+                    yield f"data: {json.dumps({'error': 'Conversation no longer exists.'})}\n\n".encode()
+                elif generation_failed:
+                    yield f"data: {json.dumps({'error': 'Generation failed.'})}\n\n".encode()
+                elif completed and full_reply and is_new_conversation:
+                    await _save_generated_title_if_present(
+                        request,
+                        agent,
+                        conv.id,
+                        user.id,
+                        body.message,
+                    )
+
+                # Persistence and the generation lock are complete before DONE.
+                yield b"data: [DONE]\n\n"
+            finally:
+                # Request-level observability. A tracer (Langfuse/LangSmith) is
+                # the drop-in upgrade; this line already backs a latency/cost panel.
+                logger.info(
+                    "chat stream: conv=%s provider=%s model=%s tokens=%s latency=%.2fs",
+                    conv_id_str,
+                    provider,
+                    body.model,
+                    usage.get("total"),
+                    time.time() - t_start,
+                )
 
         return StreamingResponse(
             stream_response(),
@@ -198,25 +272,48 @@ async def session_chat(
     # Non-streaming
     usage: dict = {}
     try:
-        reply = await chat_service.run_chat_session(agent, body.message, thread_id, usage_sink=usage)
+        async with request.app.state.db_session() as session:
+            async with session.begin():
+                locked_conv = await conversation_repo.get_owned_for_update(
+                    session,
+                    conv.id,
+                    user.id,
+                )
+                if locked_conv is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Conversation no longer exists.",
+                    )
+                reply = await chat_service.run_chat_session(
+                    agent,
+                    body.message,
+                    thread_id,
+                    usage_sink=usage,
+                )
+                await message_repo.create(
+                    session,
+                    conversation_id=conv.id,
+                    role="assistant",
+                    content=reply,
+                    model_used=body.model,
+                    provider=provider,
+                    tokens_used=usage.get("total"),
+                )
+                await conversation_repo.touch(session, conv.id)
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.exception("Non-streaming chat failed for conversation %s", conv_id_str)
+        raise HTTPException(status_code=500, detail="Generation failed.") from exc
 
-    async with request.app.state.db_session() as session:
-        await message_repo.create(
-            session,
-            conversation_id=conv.id,
-            role="assistant",
-            content=reply,
-            model_used=body.model,
-            provider=provider,
-            tokens_used=usage.get("total"),
+    if is_new_conversation:
+        await _save_generated_title_if_present(
+            request,
+            agent,
+            conv.id,
+            user.id,
+            body.message,
         )
-        await conversation_repo.touch(session, conv.id)
-        if is_new_conversation:
-            title = await conversation_service.generate_title(agent, body.message)
-            await conversation_repo.update_title(session, conv.id, title)
-        await session.commit()
 
     logger.info(
         "chat: conv=%s provider=%s model=%s tokens=%s latency=%.2fs",

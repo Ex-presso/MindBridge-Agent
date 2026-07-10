@@ -16,8 +16,34 @@ The application currently has two working memory mechanisms:
   the working context exceeds its budget.
 
 An `AsyncPostgresStore` is initialized alongside the checkpointer and passed to
-the compiled graph. It is infrastructure only: no graph node reads or writes
-cross-conversation memory yet.
+the compiled graph. The privacy API can inspect and clear it, and conversation
+deletion removes the matching episode key. No graph node reads or writes
+cross-conversation memory yet; read-only Selection is the next delivery unit.
+
+The privacy foundation is implemented:
+
+- The global `MEMORY_ENABLED` kill switch defaults to `false`.
+- Each user's `memory_enabled` consent flag also defaults to `false`.
+- `GET /api/v1/memory` lists the authenticated user's stored items, even while
+  memory is disabled, so disabling never hides retained data.
+- `PATCH /api/v1/memory` changes consent without depending on the Store.
+- `DELETE /api/v1/memory` commits consent off before Store access, then clears
+  every item under the user's prefix. Store failure is fail-closed: the request
+  reports an error, but consent remains disabled.
+- The settings UI exposes status, enable/disable, stored-item count, and clear
+  controls; the authenticated API returns the transparent item payloads.
+
+All durable memory belongs under one application-owned namespace:
+
+```text
+("memory", str(user_id), "semantic")
+("memory", str(user_id), "episodes")
+```
+
+The namespace root prevents collisions with LangGraph or future subsystems;
+the normalized user ID is the isolation boundary, and the final component is
+the memory category. Inspection and deletion validate returned namespaces
+before exposing or mutating them.
 
 ## Architecture decision
 
@@ -38,8 +64,10 @@ the automatic path and privacy controls are stable.
 
 ## Privacy invariants
 
-Mental-health conversations are sensitive. Long-term writes must not ship until
-all of these invariants are enforced and tested:
+Mental-health conversations are sensitive. The implemented foundation enforces
+consent, inspection, user-scoped deletion, and conversation cleanup before any
+long-term writer exists. Extraction must not ship until the remaining
+write-specific invariants below are also enforced and tested:
 
 - Memory is explicitly enabled per user and can be disabled immediately.
 - Users can inspect and delete every durable memory stored about them.
@@ -50,6 +78,19 @@ all of these invariants are enforced and tested:
   memory in the first version.
 - Stored memory is rendered as untrusted structured data, never as executable
   instructions.
+
+Conversation generation and deletion use the same `SELECT ... FOR UPDATE` row
+lock. If generation owns the lock, deletion waits and then removes the final
+checkpoint and episode. If deletion owns it, a waiting generation rechecks the
+row, sees that it is gone, and never invokes the graph. External Store and
+checkpoint cleanup happens before the relational delete; failures propagate so
+the remaining row makes the idempotent operation safe to retry.
+
+This deliberately holds a database connection and row lock for the duration of
+one generation. It serializes concurrent runs for the same conversation while
+allowing different conversations to proceed independently. That cost is
+acceptable for the current deployment and should be revisited if long-running
+streams or per-conversation concurrency become common.
 
 ## Planned data model
 
@@ -66,9 +107,9 @@ may need for later recall.
 
 ## Delivery order
 
-1. Repair checkpoint deletion and compaction boundary handling.
-2. Add consent, inspection, deletion, and schema foundations.
-3. Add user-scoped, read-only Selection with manually seeded memories.
+1. **Complete:** repair checkpoint deletion and compaction boundary handling.
+2. **Complete:** add consent, inspection, deletion, and schema foundations.
+3. **Next:** add user-scoped, read-only Selection with manually seeded memories.
 4. Add independent episode summaries and idempotent Extraction.
 5. Add conflict-aware Consolidation.
 6. Add a constrained explicit-memory tool if evaluation justifies it.

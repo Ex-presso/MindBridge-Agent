@@ -39,9 +39,23 @@ async def delete_conversation(
     db: AsyncSession = Depends(get_db),
 ):
     checkpointer = getattr(request.app.state, "checkpointer", None)
-    deleted = await conversation_service.delete_conversation(db, conversation_id, user.id, checkpointer=checkpointer)
+    store = getattr(request.app.state, "store", None)
+    if checkpointer is None or store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Conversation storage is unavailable.",
+        )
+    deleted = await conversation_service.delete_conversation(
+        db,
+        conversation_id,
+        user.id,
+        checkpointer=checkpointer,
+        store=store,
+    )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
+    # Commit the row deletion and release its lock before sending 204.
+    await db.commit()
 
 
 @router.patch("/{conversation_id}/title", response_model=ConversationResponse)

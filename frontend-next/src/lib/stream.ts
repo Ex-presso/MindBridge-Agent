@@ -7,7 +7,7 @@
  */
 export async function* readSSEStream(response: Response): AsyncGenerator<string> {
   const reader = response.body?.getReader();
-  if (!reader) return;
+  if (!reader) throw new Error("Streaming response body is unavailable.");
 
   const decoder = new TextDecoder();
   let buffer = "";
@@ -29,4 +29,6 @@ export async function* readSSEStream(response: Response): AsyncGenerator<string>
       if (parsed.delta) yield parsed.delta;
     }
   }
+
+  throw new Error("Stream ended before completion.");
 }

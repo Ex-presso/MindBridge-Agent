@@ -1,16 +1,26 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, Eye, EyeOff, Key, Trash2 } from "lucide-react";
+import { ArrowLeft, Brain, Check, Eye, EyeOff, Key, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useApiKeys } from "@/hooks/useApiKeys";
+import { useMemory } from "@/hooks/useMemory";
 import { PROVIDER_INFO } from "@/types";
 
 const PROVIDERS = ["openai", "anthropic", "google_genai", "openai_compatible", "anthropic_compatible"];
+const MEMORY_ERROR_TOAST_ID = "memory-settings-error";
 
 function ProviderCard({
   provider,
@@ -162,6 +172,72 @@ function ProviderCard({
 export default function SettingsPage() {
   const router = useRouter();
   const { keys, saveKey, deleteKey, keysLoading } = useApiKeys();
+  const {
+    memory,
+    memoryLoading,
+    memoryError,
+    setMemoryEnabled,
+    clearMemory,
+  } = useMemory();
+  const [memoryBusy, setMemoryBusy] = useState<"toggle" | "clear" | null>(null);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (memoryError) {
+      toast.error(
+        memoryError instanceof Error ? memoryError.message : "Failed to load memory settings",
+        { id: MEMORY_ERROR_TOAST_ID },
+      );
+    }
+  }, [memoryError]);
+
+  const memoryUnknown = !memoryLoading && (!memory || Boolean(memoryError));
+  const memoryEnabled = memoryUnknown ? null : (memory?.memory_enabled ?? null);
+  const systemEnabled = memoryUnknown ? null : (memory?.system_enabled ?? null);
+  const storedMemoryCount = memory && !memoryUnknown
+    ? `${memory.items.length}${memory.has_more ? "+" : ""}`
+    : "—";
+
+  const handleMemoryToggle = async () => {
+    // When inspection is unavailable, only offer the privacy-safe direction.
+    const nextEnabled = memoryEnabled === null ? false : !memoryEnabled;
+    setMemoryBusy("toggle");
+    try {
+      const status = await setMemoryEnabled(nextEnabled);
+      if (nextEnabled && !status.system_enabled) {
+        toast.error("Memory is disabled at the system level");
+      } else {
+        toast.success(status.memory_enabled ? "Memory enabled" : "Memory disabled");
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update memory settings",
+        { id: MEMORY_ERROR_TOAST_ID },
+      );
+    } finally {
+      setMemoryBusy(null);
+    }
+  };
+
+  const handleClearMemory = async () => {
+    setMemoryBusy("clear");
+    try {
+      const result = await clearMemory();
+      setClearDialogOpen(false);
+      toast.success(
+        result.deleted_items === 1
+          ? "1 stored memory cleared"
+          : `${result.deleted_items} stored memories cleared`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to clear memory",
+        { id: MEMORY_ERROR_TOAST_ID },
+      );
+    } finally {
+      setMemoryBusy(null);
+    }
+  };
 
   const keyMap: Record<string, typeof keys[number] | null> = {};
   for (const provider of PROVIDERS) {
@@ -203,6 +279,116 @@ export default function SettingsPage() {
         <p className="text-xs text-[--muted-foreground] text-center">
           Your keys are encrypted at rest and never shared. They are used only to make LLM API calls on your behalf.
         </p>
+
+        <Separator className="my-8" />
+
+        <section aria-labelledby="memory-settings-title">
+          <div className="mb-4 flex items-start gap-3">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[--muted] text-[--muted-foreground]">
+              <Brain className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 id="memory-settings-title" className="text-base font-semibold">Memory</h2>
+              <p className="text-xs leading-5 text-[--muted-foreground]">
+                Control whether MindBridge can retain useful context between conversations.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[--border] bg-[--background] p-5" aria-busy={memoryLoading || memoryBusy !== null}>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">Long-term memory</p>
+                  {memoryLoading ? (
+                    <span className="text-xs text-[--muted-foreground]">Loading…</span>
+                  ) : memoryUnknown ? (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">Unable to load</span>
+                  ) : !systemEnabled ? (
+                    <span className="rounded-full bg-[--muted] px-2 py-0.5 text-xs text-[--muted-foreground]">Unavailable</span>
+                  ) : memoryEnabled ? (
+                    <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/20 dark:text-green-400">
+                      <Check className="h-3 w-3" aria-hidden="true" /> Enabled
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-[--muted] px-2 py-0.5 text-xs text-[--muted-foreground]">Disabled</span>
+                  )}
+                </div>
+                <p className="mt-1 max-w-lg text-xs leading-5 text-[--muted-foreground]">
+                  {memoryUnknown
+                    ? "We could not verify your current memory status or stored item count. You can still turn memory off or clear it below."
+                    : systemEnabled
+                    ? memoryEnabled
+                      ? "MindBridge can save and use context to make future conversations more consistent. Disabling stops use and new storage without deleting existing items."
+                      : "Memory is off by default. Enabling allows MindBridge to save and use context between conversations. Existing items remain until you clear them."
+                    : "Long-term memory has been disabled at the system level. You can still clear anything already stored."}
+                </p>
+              </div>
+
+              <div className="shrink-0 text-left sm:text-right">
+                <p className="text-lg font-semibold tabular-nums" aria-label={`${storedMemoryCount} stored memories`}>
+                  {storedMemoryCount}
+                </p>
+                <p className="text-xs text-[--muted-foreground]">stored memories</p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[--border] pt-4">
+              <Button
+                size="sm"
+                variant={memoryEnabled ? "outline" : "default"}
+                onClick={handleMemoryToggle}
+                disabled={memoryLoading || memoryBusy !== null || (systemEnabled === false && memoryEnabled === false)}
+              >
+                {memoryBusy === "toggle"
+                  ? "Updating…"
+                  : memoryEnabled === null
+                    ? "Turn memory off"
+                  : memoryEnabled
+                    ? "Disable memory"
+                    : "Enable memory"}
+              </Button>
+
+              <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-[--destructive]"
+                    disabled={memoryLoading || memoryBusy !== null}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Clear and disable
+                  </Button>
+                </DialogTrigger>
+                <DialogContent aria-describedby="clear-memory-description">
+                  <DialogHeader>
+                    <DialogTitle>Clear all stored memory?</DialogTitle>
+                    <p id="clear-memory-description" className="text-sm leading-6 text-[--muted-foreground]">
+                      This permanently deletes the context MindBridge has saved about you and turns memory off. This action cannot be undone.
+                    </p>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setClearDialogOpen(false)}
+                      disabled={memoryBusy === "clear"}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleClearMemory}
+                      disabled={memoryBusy === "clear"}
+                    >
+                      {memoryBusy === "clear" ? "Clearing…" : "Clear and disable"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );

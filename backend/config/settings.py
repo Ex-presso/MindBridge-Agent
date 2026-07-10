@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     COMPACT_MICRO_KEEP_RESULTS: int = 3    # keep the last N tool results verbatim
     COMPACT_MICRO_MIN_CHARS: int = 120     # only compact tool results longer than this
 
+    # Global kill switch for durable, cross-conversation memory. Per-user
+    # consent is stored separately on User.memory_enabled and defaults off.
+    MEMORY_ENABLED: bool = False
+
     # Embedding settings: "sentence_transformers", "local" (LM Studio / Ollama), or "gemini"
     EMBEDDING_PROVIDER: str = "sentence_transformers"
     EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
@@ -55,7 +59,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:7860",
     ]
     CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: list[str] = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    CORS_ALLOW_METHODS: list[str] = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     CORS_ALLOW_HEADERS: list[str] = ["*"]
 
     LOG_LEVEL: str = "INFO"

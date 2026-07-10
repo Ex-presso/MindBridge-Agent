@@ -20,6 +20,24 @@ async def get_by_id(db: AsyncSession, conv_id: uuid.UUID) -> Conversation | None
     return result.scalar_one_or_none()
 
 
+async def get_owned_for_update(
+    db: AsyncSession,
+    conv_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> Conversation | None:
+    """Lock an owned conversation until the current transaction finishes.
+
+    Chat runs and deletion both use this lock so a completed deletion cannot be
+    followed by a still-running graph recreating the conversation checkpoint.
+    """
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conv_id, Conversation.user_id == user_id)
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
 async def list_by_user(db: AsyncSession, user_id: uuid.UUID, *, limit: int = 50) -> list[Conversation]:
     result = await db.execute(
         select(Conversation)
