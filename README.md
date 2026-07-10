@@ -101,6 +101,7 @@ legacy/         Retired Gradio frontend
 ## Documentation
 
 - [docs/EVALUATION.md](docs/EVALUATION.md): evaluation methodology, full results, limitations
+- [docs/MEMORY.md](docs/MEMORY.md): working-memory baseline and long-term memory architecture
 
 ## Tech Stack
 

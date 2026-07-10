@@ -52,6 +52,23 @@ def test_over_budget_summarizes_and_prunes(monkeypatch):
     assert len(removed_ids) < len(msgs)   # recent tail kept
 
 
+def test_oversized_latest_message_kept_without_index_error(monkeypatch):
+    monkeypatch.setattr(settings, "COMPACT_TRIGGER_TOKENS", 20)
+    monkeypatch.setattr(settings, "COMPACT_KEEP_RECENT_TOKENS", 5)
+    msgs = [
+        HumanMessage(content="earlier concern", id="m0"),
+        AIMessage(content="earlier response", id="m1"),
+        HumanMessage(content="very long current message " * 40, id="m2"),
+    ]
+
+    result = asyncio.run(_agent()._summarize_node({"messages": msgs, "tool_iterations": 0}))
+
+    assert result["summary"] == "SUMMARY OF EARLIER TURNS"
+    removed_ids = {m.id for m in result["messages"] if isinstance(m, RemoveMessage)}
+    assert removed_ids == {"m0", "m1"}
+    assert "m2" not in removed_ids
+
+
 def test_cut_never_strands_a_tool_pair(monkeypatch):
     monkeypatch.setattr(settings, "COMPACT_TRIGGER_TOKENS", 20)
     monkeypatch.setattr(settings, "COMPACT_KEEP_RECENT_TOKENS", 12)

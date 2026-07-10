@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
     # 2b. LangGraph Store: long-term, cross-thread memory (user profile / episodes)
     #     keyed by user_id, complementing the checkpointer (short-term, per-thread).
     #     KV-only scaffolding for now; the vector index for episode search is added
-    #     with the Selection node (docs/memory_design.md §5.3). Reuses the pool.
+    #     with the Selection node (see docs/MEMORY.md). Reuses the pool.
     from langgraph.store.postgres.aio import AsyncPostgresStore
 
     store = AsyncPostgresStore(pool)

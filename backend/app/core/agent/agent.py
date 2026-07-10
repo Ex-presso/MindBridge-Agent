@@ -191,6 +191,11 @@ class Agent:
             if acc > settings.COMPACT_KEEP_RECENT_TOKENS:
                 break
             keep_from -= 1
+        # If the newest message alone exceeds the keep budget, preserve it and
+        # compact only the earlier context. Leaving keep_from at len(messages)
+        # would index one past the end in the boundary scan below.
+        if keep_from == len(messages):
+            keep_from -= 1
         # Snap back to a HumanMessage so the kept window can't open on an orphaned
         # ToolMessage (providers reject that).
         while keep_from > 0 and not isinstance(messages[keep_from], HumanMessage):

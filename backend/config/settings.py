@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # working context exceeds COMPACT_TRIGGER_TOKENS, fold older turns into a running
     # summary and prune them, keeping ~COMPACT_KEEP_RECENT_TOKENS of recent turns
     # verbatim. Cheap-first: microCompact replaces old (re-derivable) tool results
-    # with a placeholder before paying for LLM summarization. See docs/memory_design.md §5.2.
+    # with a placeholder before paying for LLM summarization. See docs/MEMORY.md.
     COMPACT_TRIGGER_TOKENS: int = 6000
     COMPACT_KEEP_RECENT_TOKENS: int = 2000
     COMPACT_MICRO_KEEP_RESULTS: int = 3    # keep the last N tool results verbatim

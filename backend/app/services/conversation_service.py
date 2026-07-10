@@ -60,11 +60,10 @@ async def delete_conversation(db: AsyncSession, conv_id: uuid.UUID, user_id: uui
         return False
     # Delete LangGraph checkpoint if checkpointer available
     if checkpointer is not None:
-        try:
-            config = {"configurable": {"thread_id": str(conv_id)}}
-            await checkpointer.adelete_thread(config)
-        except Exception:
-            pass
+        # AsyncPostgresSaver expects the raw thread ID, not a RunnableConfig.
+        # Let failures propagate so the request can be retried instead of
+        # reporting success while leaving sensitive checkpoint data behind.
+        await checkpointer.adelete_thread(str(conv_id))
     return await conversation_repo.delete_by_id(db, conv_id)
 
 
