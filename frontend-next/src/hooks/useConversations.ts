@@ -6,20 +6,26 @@ import type { Conversation } from "@/types";
 
 export function useConversations() {
   const accessToken = useAuthStore((s) => s.accessToken);
+  const userId = useAuthStore((s) => s.user?.id);
+  const conversationsKey = accessToken && userId
+    ? (["conversations", userId] as const)
+    : null;
 
   const { data, error, mutate, isLoading } = useSWR<Conversation[]>(
-    accessToken ? "/conversations" : null,
-    () => api.conversations.list(),
+    conversationsKey,
+    () => api.conversations.list(conversationsKey![1]),
     { revalidateOnFocus: false },
   );
 
   const deleteConversation = async (id: string) => {
-    await api.conversations.delete(id);
+    if (!userId) throw new Error("Authentication session changed.");
+    await api.conversations.delete(userId, id);
     mutate(data?.filter((c) => c.id !== id));
   };
 
   const renameConversation = async (id: string, title: string) => {
-    await api.conversations.updateTitle(id, title);
+    if (!userId) throw new Error("Authentication session changed.");
+    await api.conversations.updateTitle(userId, id, title);
     mutate(data?.map((c) => (c.id === id ? { ...c, title } : c)));
   };
 

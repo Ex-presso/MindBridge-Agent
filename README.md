@@ -50,6 +50,14 @@ docker compose up -d
 
 Open [http://localhost:3000](http://localhost:3000), create an account, add your API key under **Settings**, and start chatting. The backend runs at `:8080`, with interactive API docs at [http://localhost:8080/docs](http://localhost:8080/docs).
 
+With the default `AUTO_CREATE_TABLES=true`, local and Docker startup runs the
+Alembic migration chain automatically. It also recognizes and safely adopts the
+older complete schema created by SQLAlchemy `create_all`; partial or unfamiliar
+unversioned schemas stop with an actionable error instead of being stamped.
+Production deployments should set `AUTO_CREATE_TABLES=false` and run
+`cd backend && uv run alembic upgrade head` as an explicit release step before
+starting the API.
+
 <details>
 <summary>Local development without Docker</summary>
 

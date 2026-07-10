@@ -77,15 +77,20 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting MindBridge backend...")
 
-    # 1. Create DB tables. Dev convenience only — production should run Alembic
-    #    migrations and set AUTO_CREATE_TABLES=False.
-    from app.db.engine import engine, Base, AsyncSessionLocal
-    from app.db.models import User, Conversation, Message, UserApiKey  # ensure models are registered
+    # 1. Dev/Docker convenience: adopt known legacy create_all databases and
+    #    apply Alembic migrations. Production keeps migrations as an explicit
+    #    deployment step by setting AUTO_CREATE_TABLES=False.
+    from app.db.engine import AsyncSessionLocal, engine
     if settings.AUTO_CREATE_TABLES:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        from app.db.schema_migrations import ensure_schema_at_head
+
+        plan = await ensure_schema_at_head(engine)
+        logger.info("Database schema is at Alembic head (%s).", plan.reason)
     else:
-        logger.info("AUTO_CREATE_TABLES=False — skipping create_all (expecting Alembic-migrated schema).")
+        logger.info(
+            "AUTO_CREATE_TABLES=False — skipping automatic Alembic upgrade "
+            "(expecting a manually migrated schema)."
+        )
     app.state.db_session = AsyncSessionLocal
 
     # 2. Set up LangGraph PostgreSQL checkpointer

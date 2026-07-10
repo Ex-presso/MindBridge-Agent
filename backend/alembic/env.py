@@ -8,13 +8,14 @@ from alembic import context
 # Alembic Config object
 config = context.config
 
-# Interpret the config file for Python logging.
-if config.config_file_name is not None:
+# Interpret the config file for Python logging when Alembic owns the process.
+# App startup injects its existing logger and connection instead.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 # Import Base and all models so metadata is populated
 from app.db.engine import Base
-from app.db.models import User, Conversation, Message  # noqa: F401
+from app.db.models import Conversation, Message, User, UserApiKey  # noqa: F401
 
 target_metadata = Base.metadata
 
@@ -53,6 +54,10 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        do_run_migrations(connection)
+        return
     asyncio.run(run_async_migrations())
 
 

@@ -33,6 +33,12 @@ The privacy foundation is implemented:
 - The settings UI exposes status, enable/disable, stored-item count, and clear
   controls; the authenticated API returns the transparent item payloads.
 
+The `memory_enabled` column is delivered through Alembic. With the default
+`AUTO_CREATE_TABLES=true`, development and Docker startup safely adopt a known
+legacy `create_all` schema (when no Alembic revision exists) and upgrade it to
+head. Production keeps `AUTO_CREATE_TABLES=false` and runs
+`uv run alembic upgrade head` as an explicit deployment step.
+
 All durable memory belongs under one application-owned namespace:
 
 ```text
@@ -91,6 +97,14 @@ one generation. It serializes concurrent runs for the same conversation while
 allowing different conversations to proceed independently. That cost is
 acceptable for the current deployment and should be revisited if long-running
 streams or per-conversation concurrency become common.
+
+The LangGraph checkpoint and the relational `messages` row are still committed
+by separate database clients. A failure after the graph checkpoint succeeds but
+before the assistant row commits can therefore make graph history lead the UI
+history. The API reports the failure and never sends a successful terminal
+frame, but it cannot roll the checkpoint back atomically. Before production
+hardening, add an idempotent outbox/reconciliation path (or choose one store as
+the sole source of truth) and fault-injection tests for this boundary.
 
 ## Planned data model
 

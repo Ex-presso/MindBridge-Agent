@@ -6,26 +6,33 @@ import type { ApiKeyConfig, ProviderModels } from "@/types";
 
 export function useApiKeys() {
   const accessToken = useAuthStore((s) => s.accessToken);
+  const userId = useAuthStore((s) => s.user?.id);
+  const keysKey = accessToken && userId ? (["api-keys", userId] as const) : null;
+  const modelsKey = accessToken && userId
+    ? (["api-key-models", userId] as const)
+    : null;
 
   const { data: keys, mutate: mutateKeys, isLoading: keysLoading } = useSWR<ApiKeyConfig[]>(
-    accessToken ? "/api-keys" : null,
-    () => api.apiKeys.list(),
+    keysKey,
+    () => api.apiKeys.list(keysKey![1]),
   );
 
   const { data: models, mutate: mutateModels, isLoading: modelsLoading } = useSWR<ProviderModels[]>(
-    accessToken ? "/api-keys/models" : null,
-    () => api.apiKeys.models(),
+    modelsKey,
+    () => api.apiKeys.models(modelsKey![1]),
   );
 
   const saveKey = async (data: { provider: string; api_key: string; base_url?: string; model_id?: string; display_name?: string }) => {
-    const result = await api.apiKeys.save(data);
+    if (!userId) throw new Error("Authentication session changed.");
+    const result = await api.apiKeys.save(userId, data);
     mutateKeys();
     mutateModels();
     return result;
   };
 
   const deleteKey = async (provider: string) => {
-    await api.apiKeys.delete(provider);
+    if (!userId) throw new Error("Authentication session changed.");
+    await api.apiKeys.delete(userId, provider);
     mutateKeys();
     mutateModels();
   };

@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from app.api.v1 import memory as memory_api
 from app.services import memory_service
@@ -25,11 +26,11 @@ def _item(user_id, category, key):
 
 
 class _Result:
-    def __init__(self, user):
-        self._user = user
+    def __init__(self, value):
+        self._value = value
 
     def scalar_one_or_none(self):
-        return self._user
+        return self._value
 
 
 class _Db:
@@ -39,11 +40,17 @@ class _Db:
         self.execute_count = 0
         self.commit_count = 0
         self.rollback_count = 0
+        self.statements = []
 
-    async def execute(self, _statement):
+    async def execute(self, statement):
         self.execute_count += 1
-        self.events.append("lock")
-        return _Result(self.user)
+        self.statements.append(statement)
+        self.events.append("consent_write")
+        enabled = statement.compile().params["memory_enabled"]
+        if self.user is None:
+            return _Result(None)
+        self.user.memory_enabled = enabled
+        return _Result(enabled)
 
     async def commit(self):
         self.commit_count += 1
@@ -130,7 +137,7 @@ def test_list_memory_items_rejects_cross_user_store_results():
         asyncio.run(memory_service.list_memory_items(UnsafeStore(), user_id))
 
 
-def test_set_memory_consent_only_updates_locked_user():
+def test_set_memory_consent_uses_forced_update_returning():
     user_id = uuid.uuid4()
     user = SimpleNamespace(id=user_id, memory_enabled=False)
     db = _Db(user)
@@ -143,6 +150,9 @@ def test_set_memory_consent_only_updates_locked_user():
     assert user.memory_enabled is True
     assert db.execute_count == 1
     assert db.commit_count == 1
+    sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
+    assert "UPDATE users SET memory_enabled" in sql
+    assert "RETURNING users.memory_enabled" in sql
 
 
 def test_clear_memory_disables_before_store_access_and_batch_deletes():
@@ -162,7 +172,7 @@ def test_clear_memory_disables_before_store_access_and_batch_deletes():
 
     assert deleted == 2
     assert user.memory_enabled is False
-    assert events[:3] == ["lock", "commit", "lock"]
+    assert events[:3] == ["consent_write", "commit", "consent_write"]
     assert events[3:] == ["search", "delete", "search", "commit"]
     assert db.execute_count == 2
     assert all(operation.value is None for operation in store.batches[0])

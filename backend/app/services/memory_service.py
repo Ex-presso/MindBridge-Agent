@@ -1,11 +1,11 @@
 """Privacy controls and transparent access for durable user memory."""
 
 from collections.abc import Sequence
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Literal, TypeAlias
 import uuid
 
 from langgraph.store.base import PutOp
-from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.user import User
@@ -115,14 +115,30 @@ async def list_memory_items(
     return list(results[:limit]), len(results) > limit
 
 
-async def _lock_user(db: AsyncSession, user_id: uuid.UUID) -> User:
+async def _write_memory_consent(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    enabled: bool,
+) -> bool:
+    """Force a consent write and hold the row lock until transaction end.
+
+    The authenticated ``User`` is already present in this session's identity
+    map. A SELECT FOR UPDATE would lock the database row but can still return
+    that stale Python object, making an apparently redundant assignment skip
+    the UPDATE. UPDATE ... RETURNING is both the lock and an unconditional
+    database write, so fail-closed transitions cannot be lost.
+    """
     result = await db.execute(
-        select(User).where(User.id == user_id).with_for_update()
+        update(User)
+        .where(User.id == user_id)
+        .values(memory_enabled=enabled)
+        .returning(User.memory_enabled)
     )
-    user = result.scalar_one_or_none()
-    if user is None:
+    stored_value = result.scalar_one_or_none()
+    if stored_value is None:
         raise MemoryUserNotFoundError("User not found.")
-    return cast(User, user)
+    return bool(stored_value)
 
 
 async def set_memory_consent(
@@ -132,10 +148,9 @@ async def set_memory_consent(
     enabled: bool,
 ) -> bool:
     """Atomically change only the user's consent flag."""
-    user = await _lock_user(db, user_id)
-    user.memory_enabled = enabled
+    stored_value = await _write_memory_consent(db, user_id, enabled=enabled)
     await db.commit()
-    return user.memory_enabled
+    return stored_value
 
 
 async def clear_memory(
@@ -149,8 +164,7 @@ async def clear_memory(
     leave future reads or writes enabled. A second row lock serializes deletion
     against a concurrent consent update while batches are being removed.
     """
-    user = await _lock_user(db, user_id)
-    user.memory_enabled = False
+    await _write_memory_consent(db, user_id, enabled=False)
     await db.commit()
 
     deleted = 0
@@ -158,10 +172,10 @@ async def clear_memory(
     previous_batch: tuple[tuple[tuple[str, ...], str], ...] | None = None
 
     try:
-        locked_user = await _lock_user(db, user_id)
-        # Re-assert fail-closed consent under the lock in case a concurrent
-        # PATCH completed in the small window after the first commit.
-        locked_user.memory_enabled = False
+        # Re-assert fail-closed consent with an unconditional write in case a
+        # concurrent PATCH completed in the small window after the first commit.
+        # This UPDATE also holds the user row lock across Store deletion.
+        await _write_memory_consent(db, user_id, enabled=False)
         if store is None:
             raise MemoryStoreError("Memory Store is unavailable.")
         while True:

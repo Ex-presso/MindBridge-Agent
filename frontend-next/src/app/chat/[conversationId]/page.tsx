@@ -7,6 +7,7 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { useChat } from "@/hooks/useChat";
 import { useConversations } from "@/hooks/useConversations";
 import { useApiKeys } from "@/hooks/useApiKeys";
+import { useAuthStore } from "@/stores/authStore";
 import useSWR from "swr";
 
 interface Props {
@@ -16,12 +17,17 @@ interface Props {
 export default function ConversationPage({ params }: Props) {
   const { conversationId } = use(params);
   const router = useRouter();
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const userId = useAuthStore((state) => state.user?.id);
   const { refresh } = useConversations();
   const { availableModels } = useApiKeys();
+  const conversationKey = accessToken && userId && conversationId
+    ? (["conversation", userId, conversationId] as const)
+    : null;
 
   const { data, isLoading: historyLoading, error } = useSWR(
-    conversationId ? `/conversations/${conversationId}` : null,
-    () => api.conversations.get(conversationId),
+    conversationKey,
+    () => api.conversations.get(conversationKey![1], conversationKey![2]),
   );
 
   const { messages, isLoading, sendMessage, resetMessages } = useChat({
@@ -37,7 +43,7 @@ export default function ConversationPage({ params }: Props) {
     if (data?.messages) {
       resetMessages(data.messages);
     }
-  }, [data?.id]);
+  }, [data?.id, data?.messages, resetMessages]);
 
   useEffect(() => {
     if (error) {

@@ -89,7 +89,8 @@ class Settings(BaseSettings):
     # Legacy /chat/completions is unauthenticated and uses system keys — off by
     # default; enable only for a trusted local OpenAI-compatible client.
     ENABLE_LEGACY_CHAT_ENDPOINT: bool = False
-    # Create tables on startup (dev convenience). Use Alembic migrations in prod.
+    # Legacy flag name: safely adopt create_all databases and upgrade Alembic to
+    # head on startup (dev/Docker convenience). Run migrations explicitly in prod.
     AUTO_CREATE_TABLES: bool = True
 
     # Max input length

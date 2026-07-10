@@ -10,16 +10,20 @@ const MEMORY_PAGE_SIZE = 50;
 export function useMemory() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const userId = useAuthStore((state) => state.user?.id);
+  const memoryKey = accessToken && userId
+    ? (["memory", userId, MEMORY_PAGE_SIZE, 0] as const)
+    : null;
 
   const { data, error, isLoading, mutate } = useSWR<MemoryList>(
-    accessToken && userId ? ["memory", userId, MEMORY_PAGE_SIZE, 0] : null,
-    () => api.memory.get(MEMORY_PAGE_SIZE, 0),
+    memoryKey,
+    () => api.memory.get(memoryKey![1], MEMORY_PAGE_SIZE, 0),
     { revalidateOnFocus: false },
   );
 
   const setMemoryEnabled = async (memoryEnabled: boolean) => {
+    if (!userId) throw new Error("Authentication session changed.");
     try {
-      const status = await api.memory.toggle(memoryEnabled);
+      const status = await api.memory.toggle(userId, memoryEnabled);
       await mutate(
         (current) => current ? { ...current, ...status } : current,
         { revalidate: false },
@@ -33,8 +37,9 @@ export function useMemory() {
   };
 
   const clearMemory = async () => {
+    if (!userId) throw new Error("Authentication session changed.");
     try {
-      const result = await api.memory.clear();
+      const result = await api.memory.clear(userId);
       await mutate(
         (current) => current
           ? {

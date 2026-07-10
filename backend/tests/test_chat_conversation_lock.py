@@ -426,9 +426,69 @@ def test_title_update_failure_does_not_change_successful_stream(monkeypatch):
             arranged.request_db,
         )
         frames = [_sse_payload(frame) async for frame in response.body_iterator]
+        if chat_api._BACKGROUND_TASKS:
+            await asyncio.gather(*tuple(chat_api._BACKGROUND_TASKS))
 
         assert frames == [{"delta": "complete reply"}, "[DONE]"]
         assert "message_create:assistant" in arranged.events
+
+    asyncio.run(scenario())
+
+
+def test_title_update_does_not_delay_done(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=True)
+        arranged.body.conversation_id = None
+        monkeypatch.setattr(
+            chat_api.conversation_service,
+            "create_conversation",
+            AsyncMock(return_value=arranged.conversation),
+        )
+        monkeypatch.setattr(
+            chat_api.conversation_repo,
+            "get_owned_for_update",
+            AsyncMock(return_value=arranged.conversation),
+        )
+
+        title_started = asyncio.Event()
+        release_title = asyncio.Event()
+
+        async def blocked_title_update(*args, **kwargs):
+            title_started.set()
+            await release_title.wait()
+
+        async def stream_graph(*args, **kwargs):
+            yield "complete reply"
+
+        monkeypatch.setattr(
+            chat_api,
+            "_save_generated_title_if_present",
+            blocked_title_update,
+        )
+        monkeypatch.setattr(
+            chat_api.chat_service,
+            "stream_chat_session",
+            stream_graph,
+        )
+
+        response = await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+
+        async def collect_frames():
+            return [_sse_payload(frame) async for frame in response.body_iterator]
+
+        frames = await asyncio.wait_for(collect_frames(), timeout=0.5)
+        assert frames == [{"delta": "complete reply"}, "[DONE]"]
+        await asyncio.sleep(0)
+        assert title_started.is_set()
+
+        release_title.set()
+        if chat_api._BACKGROUND_TASKS:
+            await asyncio.gather(*tuple(chat_api._BACKGROUND_TASKS))
 
     asyncio.run(scenario())
 

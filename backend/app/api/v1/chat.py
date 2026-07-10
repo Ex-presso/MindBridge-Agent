@@ -1,4 +1,5 @@
 """Chat endpoints: legacy OpenAI-compatible + new session-aware."""
+import asyncio
 import json
 import logging
 import time
@@ -40,6 +41,8 @@ from collections import OrderedDict
 
 _AGENT_CACHE: "OrderedDict[tuple, object]" = OrderedDict()
 _AGENT_CACHE_MAX = 128
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+_TITLE_UPDATE_TIMEOUT_SECONDS = 15.0
 
 
 def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: str, checkpointer, store=None):
@@ -87,6 +90,42 @@ async def _save_generated_title_if_present(
             "Conversation title update failed for conversation %s",
             conversation_id,
         )
+
+
+def _schedule_title_update(
+    request: Request,
+    agent,
+    conversation_id: uuid.UUID,
+    user_id: uuid.UUID,
+    first_user_message: str,
+) -> None:
+    """Run best-effort title work without delaying a successful chat response."""
+
+    async def run_bounded() -> None:
+        try:
+            await asyncio.wait_for(
+                _save_generated_title_if_present(
+                    request,
+                    agent,
+                    conversation_id,
+                    user_id,
+                    first_user_message,
+                ),
+                timeout=_TITLE_UPDATE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning(
+                "Conversation title update timed out for conversation %s",
+                conversation_id,
+            )
+
+    task = asyncio.create_task(
+        run_bounded(),
+        name=f"conversation-title-{conversation_id}",
+    )
+    # asyncio keeps only weak task references; retain this one until completion.
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 # ── Legacy endpoint (kept for OpenWebUI / third-party clients) ────────────────
@@ -241,7 +280,7 @@ async def session_chat(
                 elif generation_failed:
                     yield f"data: {json.dumps({'error': 'Generation failed.'})}\n\n".encode()
                 elif completed and full_reply and is_new_conversation:
-                    await _save_generated_title_if_present(
+                    _schedule_title_update(
                         request,
                         agent,
                         conv.id,
@@ -307,7 +346,7 @@ async def session_chat(
         raise HTTPException(status_code=500, detail="Generation failed.") from exc
 
     if is_new_conversation:
-        await _save_generated_title_if_present(
+        _schedule_title_update(
             request,
             agent,
             conv.id,
