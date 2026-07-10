@@ -59,7 +59,9 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
     user_id = uuid.uuid4()
     conversation_id = uuid.uuid4()
     conversation = SimpleNamespace(id=conversation_id, user_id=user_id)
-    user = SimpleNamespace(id=user_id)
+    # Simulate an authenticated ORM object loaded before a PATCH disabled
+    # memory. The generation path must ignore this stale value.
+    user = SimpleNamespace(id=user_id, memory_enabled=True)
     request_db = AsyncMock()
 
     async def commit_request():
@@ -94,6 +96,11 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
         lambda _: "decrypted",
     )
     monkeypatch.setattr(chat_api, "_get_agent", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        chat_api.user_repo,
+        "get_memory_enabled",
+        AsyncMock(return_value=False),
+    )
     async def lock_conversation(db, locked_conversation_id, locked_user_id):
         lock_scope = "initial" if db is request_db else "generation"
         events.append(f"conversation_lock:{lock_scope}")
@@ -227,8 +234,18 @@ def test_stream_persists_reply_and_releases_lock_before_done(monkeypatch):
             arranged.events.append(f"conversation_lock:{lock_scope}")
             return arranged.conversation
 
-        async def stream_graph(agent, message, thread_id, *, usage_sink):
+        async def stream_graph(
+            agent,
+            message,
+            thread_id,
+            *,
+            user_id,
+            memory_enabled,
+            usage_sink,
+        ):
             arranged.events.append("graph_started")
+            assert user_id == str(arranged.user.id)
+            assert memory_enabled is False
             usage_sink["total"] = 7
             yield "hello\n"
             yield "world"
@@ -283,6 +300,56 @@ def test_stream_persists_reply_and_releases_lock_before_done(monkeypatch):
         )
         assert arranged.events.index("transaction_exit:commit") < arranged.events.index(
             "done_observed"
+        )
+
+    asyncio.run(scenario())
+
+
+def test_nonstream_rereads_latest_consent_and_passes_run_context(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=False)
+        consent_read = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            chat_api.user_repo,
+            "get_memory_enabled",
+            consent_read,
+        )
+
+        async def run_graph(
+            agent,
+            message,
+            thread_id,
+            *,
+            user_id,
+            memory_enabled,
+            usage_sink,
+        ):
+            arranged.events.append("graph_started")
+            assert thread_id == str(arranged.conversation.id)
+            assert user_id == str(arranged.user.id)
+            assert memory_enabled is False
+            assert arranged.user.memory_enabled is True
+            return "complete reply"
+
+        monkeypatch.setattr(chat_api.chat_service, "run_chat_session", run_graph)
+
+        response = await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+
+        assert response["message"]["content"] == "complete reply"
+        consent_read.assert_awaited_once()
+        read_session, read_user_id = consent_read.await_args.args
+        assert read_session is arranged.request.app.state.db_session()
+        assert read_user_id == arranged.user.id
+        assert arranged.events.index("conversation_lock:generation") < arranged.events.index(
+            "graph_started"
+        )
+        assert arranged.events.index("graph_started") < arranged.events.index(
+            "message_create:assistant"
         )
 
     asyncio.run(scenario())

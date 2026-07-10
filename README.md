@@ -7,6 +7,7 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 - **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.909 on a hand-labeled benchmark), with a bounded tool-call loop.
 - **Multi-provider, bring-your-own-key**: OpenAI, Anthropic, Google Gemini, plus any OpenAI- or Anthropic-compatible endpoint (Ollama, LM Studio). Per-user keys are Fernet-encrypted at rest.
 - **Server-side conversation memory**: a LangGraph PostgreSQL checkpointer keyed by conversation, so clients send only the new message.
+- **Opt-in long-term memory foundation**: user-scoped LangGraph Store, transparent privacy controls, and checkpoint-safe read-only Selection; automatic Extraction is intentionally not enabled yet.
 - **Real token-level SSE streaming** with optimistic UI updates.
 - **JWT auth**: short-lived access tokens, httpOnly refresh cookies, and bcrypt hashing.
 - **Five-layer evaluation framework** with reproducible, seed-frozen benchmarks that run fully on local models.
@@ -52,8 +53,11 @@ Open [http://localhost:3000](http://localhost:3000), create an account, add your
 
 With the default `AUTO_CREATE_TABLES=true`, local and Docker startup runs the
 Alembic migration chain automatically. It also recognizes and safely adopts the
-older complete schema created by SQLAlchemy `create_all`; partial or unfamiliar
-unversioned schemas stop with an actionable error instead of being stamped.
+older complete schema created by SQLAlchemy `create_all`. Unversioned schemas
+that are missing core tables or required columns stop with an actionable error
+instead of being stamped. Type and constraint fingerprinting is a later
+hardening step.
+
 Production deployments should set `AUTO_CREATE_TABLES=false` and run
 `cd backend && uv run alembic upgrade head` as an explicit release step before
 starting the API.

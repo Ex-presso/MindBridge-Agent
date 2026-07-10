@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 
 class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # Global kill switch for durable, cross-conversation memory. Per-user
     # consent is stored separately on User.memory_enabled and defaults off.
     MEMORY_ENABLED: bool = False
+    MEMORY_SELECT_SEMANTIC_LIMIT: int = Field(default=12, ge=1, le=100)
+    MEMORY_SELECT_EPISODE_TOP_K: int = Field(default=3, ge=1, le=20)
+    MEMORY_SEMANTIC_ITEM_MAX_CHARS: int = Field(default=280, ge=50, le=2000)
+    MEMORY_EPISODE_SUMMARY_MAX_CHARS: int = Field(default=800, ge=100, le=5000)
+    MEMORY_EPISODE_TOPIC_MAX_CHARS: int = Field(default=80, ge=10, le=500)
+    MEMORY_CONTEXT_MAX_CHARS: int = Field(default=4000, ge=500, le=20000)
+    MEMORY_EMBED_DIMS: int = Field(default=1024, ge=1)
 
     # Embedding settings: "sentence_transformers", "local" (LM Studio / Ollama), or "gemini"
     EMBEDDING_PROVIDER: str = "sentence_transformers"

@@ -109,15 +109,15 @@ async def lifespan(app: FastAPI):
     app.state.checkpointer = checkpointer
     app.state.pg_pool = pool
 
-    # 2b. LangGraph Store: long-term, cross-thread memory (user profile / episodes)
-    #     keyed by user_id, complementing the checkpointer (short-term, per-thread).
-    #     KV-only scaffolding for now; the vector index for episode search is added
-    #     with the Selection node (see docs/MEMORY.md). Reuses the pool.
-    from langgraph.store.postgres.aio import AsyncPostgresStore
+    # 2b. LangGraph Store: user-scoped cross-thread memory. With memory enabled,
+    #     initialize a summary vector index for episode Selection. Embedding/index
+    #     failure falls back to KV so inspection and deletion stay available.
+    from app.services.memory_store import initialize_memory_store
 
-    store = AsyncPostgresStore(pool)
-    await store.setup()  # creates the store tables (idempotent)
+    memory_runtime = await initialize_memory_store(pool)
+    store = memory_runtime.store
     app.state.store = store
+    app.state.memory_vector_enabled = memory_runtime.vector_enabled
 
     # 3. Create system agents (only for providers with keys in .env — used by legacy endpoint)
     from app.core.agent.agent import Agent
@@ -183,6 +183,11 @@ async def health_detail(request: Request):
         "status": "ok",
         "database": "connected",
         "checkpointer": "ready",
+        "memory_store": (
+            "vector"
+            if request.app.state.memory_vector_enabled
+            else "key_value"
+        ),
         "agents": list(request.app.state.stateful_agents.keys()),
     }
 

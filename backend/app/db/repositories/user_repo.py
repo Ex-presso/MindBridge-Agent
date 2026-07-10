@@ -14,6 +14,14 @@ async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def get_memory_enabled(db: AsyncSession, user_id: uuid.UUID) -> bool:
+    """Read current consent as a scalar, bypassing any stale ORM identity state."""
+    result = await db.execute(
+        select(User.memory_enabled).where(User.id == user_id)
+    )
+    return bool(result.scalar_one_or_none())
+
+
 async def create(db: AsyncSession, *, email: str, hashed_password: str, display_name: str | None = None) -> User:
     user = User(email=email, hashed_password=hashed_password, display_name=display_name)
     db.add(user)

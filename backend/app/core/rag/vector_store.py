@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+from threading import RLock
 from typing import Any
 
 from datasets import load_dataset
@@ -12,6 +14,20 @@ from langchain_core.vectorstores.base import VectorStoreRetriever
 from tqdm import tqdm
 
 from config.settings import settings
+
+
+@lru_cache(maxsize=4)
+def _load_sentence_transformer(model_name: str) -> Any:
+    """Load each local embedding model once per process."""
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name)
+
+
+@lru_cache(maxsize=4)
+def _sentence_transformer_lock(model_name: str) -> RLock:
+    """Serialize encode calls when RAG and memory share one model instance."""
+    return RLock()
 
 
 def get_embeddings() -> Embeddings:
@@ -26,7 +42,6 @@ def get_embeddings() -> Embeddings:
 
     if provider == "sentence_transformers":
         from langchain_core.embeddings import Embeddings as BaseEmbeddings
-        from sentence_transformers import SentenceTransformer
 
         class SentenceTransformerEmbeddings(BaseEmbeddings):
             """Qwen3-Embedding wrapper with asymmetric query instruction.
@@ -38,20 +53,28 @@ def get_embeddings() -> Embeddings:
             embedding model).
             """
 
-            def __init__(self, model_name: str, query_instruction: str):
-                self._model = SentenceTransformer(model_name)
+            def __init__(self, model, model_name: str, query_instruction: str):
+                self._model = model
+                self._lock = _sentence_transformer_lock(model_name)
                 self._query_instruction = query_instruction
 
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
-                return self._model.encode(texts, show_progress_bar=len(texts) > 50).tolist()
+                with self._lock:
+                    return self._model.encode(
+                        texts,
+                        show_progress_bar=len(texts) > 50,
+                    ).tolist()
 
             def embed_query(self, text: str) -> list[float]:
                 if self._query_instruction:
                     text = f"Instruct: {self._query_instruction}\nQuery: {text}"
-                return self._model.encode(text).tolist()
+                with self._lock:
+                    return self._model.encode(text).tolist()
 
         return SentenceTransformerEmbeddings(
-            settings.EMBEDDING_MODEL, settings.EMBEDDING_QUERY_INSTRUCTION
+            _load_sentence_transformer(settings.EMBEDDING_MODEL),
+            settings.EMBEDDING_MODEL,
+            settings.EMBEDDING_QUERY_INSTRUCTION,
         )
 
     elif provider == "local":

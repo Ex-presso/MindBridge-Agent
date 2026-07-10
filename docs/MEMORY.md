@@ -17,8 +17,9 @@ The application currently has two working memory mechanisms:
 
 An `AsyncPostgresStore` is initialized alongside the checkpointer and passed to
 the compiled graph. The privacy API can inspect and clear it, and conversation
-deletion removes the matching episode key. No graph node reads or writes
-cross-conversation memory yet; read-only Selection is the next delivery unit.
+deletion removes the matching episode key. The graph now performs read-only,
+user-scoped Selection before normal chat. There is still no automatic or
+user-facing long-term writer; Extraction is the next delivery unit.
 
 The privacy foundation is implemented:
 
@@ -32,6 +33,32 @@ The privacy foundation is implemented:
   reports an error, but consent remains disabled.
 - The settings UI exposes status, enable/disable, stored-item count, and clear
   controls; the authenticated API returns the transparent item payloads.
+
+Read-only Selection is also implemented:
+
+- Immediately before each graph run, the chat transaction reads the current
+  scalar consent value. This is the run's linearization point: a disable that
+  completed first prevents Store access; a request that already observed
+  enabled consent may finish as an in-flight request.
+- `safety_check → summarize → select_memory → chat` is deterministic harness
+  flow. Crisis turns, either disabled switch, a missing user, or a missing Store
+  cause zero Selection reads.
+- Selection writes only to a fresh, invocation-scoped runtime context buffer
+  and returns an empty graph-state update. Tests scan every checkpoint and
+  `pending_writes` entry to ensure selected values and the rendered prompt block
+  are never copied into checkpoint persistence.
+- Semantic facts use exact namespace reads and strict, allow-listed schemas.
+  Episodes use vector similarity over `summary`; if the embedding/index path is
+  unavailable, episode recall is skipped rather than silently using unrelated
+  recency results. Semantic facts and all privacy APIs remain available through
+  the key-value Store.
+- Only approved `kind/content` and `summary/topics` fields enter a budgeted JSON
+  block. Both the base system policy and the block label it as untrusted data,
+  so embedded role changes, tool requests, policies, and instructions are not
+  authoritative.
+- LangSmith remains off by default. Enabling prompt tracing exports the rendered
+  memory block with the rest of the LLM input, so a production deployment must
+  apply the same consent, retention, and data-processor review to tracing.
 
 The `memory_enabled` column is delivered through Alembic. With the default
 `AUTO_CREATE_TABLES=true`, development and Docker startup safely adopt a known
@@ -57,7 +84,7 @@ Long-term memory will use LangGraph Store as the persistence and namespace
 primitive. Memory behavior remains application-controlled:
 
 1. **Selection** reads user-confirmed context and relevant prior episodes before
-   a normal response.
+   a normal response. The read-only stage is implemented.
 2. **Extraction** derives narrowly scoped, attributable memory candidates after
    completed turns.
 3. **Consolidation** resolves duplicates, contradictions, and stale entries at a
@@ -98,6 +125,13 @@ allowing different conversations to proceed independently. That cost is
 acceptable for the current deployment and should be revisited if long-running
 streams or per-conversation concurrency become common.
 
+Consent changes do not cancel an already-running response. The fresh scalar
+read before the graph defines the boundary: requests starting Selection after a
+completed disable do not read memory, while an earlier in-flight request may
+still use its prompt-local snapshot. Immediate cancellation would require a
+consent epoch plus stream cancellation, not a user-row lock held for the whole
+LLM call.
+
 The LangGraph checkpoint and the relational `messages` row are still committed
 by separate database clients. A failure after the graph checkpoint succeeds but
 before the assistant row commits can therefore make graph history lead the UI
@@ -119,12 +153,20 @@ reuse the working-memory compaction summary: short conversations often never
 compact, and a compaction summary intentionally omits details that an episode
 may need for later recall.
 
+For the current manual pilot, semantic records must be written with
+`index=False` and an allow-listed value such as
+`{kind, content, status="active", explicit=true}`. Episode keys are conversation
+IDs and values contain at least
+`{conversation_id, summary, topics, status="active", crisis=false}`; their
+`summary` field is vector-indexed. There is intentionally no public write API
+until Extraction, crisis filtering, attribution, and idempotency are complete.
+
 ## Delivery order
 
 1. **Complete:** repair checkpoint deletion and compaction boundary handling.
 2. **Complete:** add consent, inspection, deletion, and schema foundations.
-3. **Next:** add user-scoped, read-only Selection with manually seeded memories.
-4. Add independent episode summaries and idempotent Extraction.
+3. **Complete:** add user-scoped, read-only Selection with manually seeded memories.
+4. **Next:** add independent episode summaries and idempotent Extraction.
 5. Add conflict-aware Consolidation.
 6. Add a constrained explicit-memory tool if evaluation justifies it.
 7. Run a frozen multi-session evaluation covering recall, contradiction updates,

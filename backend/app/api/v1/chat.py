@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from app.core.auth.deps import get_current_user
 from app.db.engine import get_db
 from app.db.models.user import User
-from app.db.repositories import conversation_repo, message_repo
+from app.db.repositories import conversation_repo, message_repo, user_repo
 from app.schemas.conversation import (
     ChatCompletionChunk,
     ChatCompletionChunkChoice,
@@ -244,10 +244,20 @@ async def session_chat(
                             if locked_conv is None:
                                 missing = True
                             else:
+                                # Linearization point for privacy consent: read a
+                                # scalar immediately before the graph invocation,
+                                # avoiding the authenticated User object's stale
+                                # identity-map value and without locking the row.
+                                memory_enabled = await user_repo.get_memory_enabled(
+                                    session,
+                                    user.id,
+                                )
                                 async for token in chat_service.stream_chat_session(
                                     agent,
                                     body.message,
                                     thread_id,
+                                    user_id=str(user.id),
+                                    memory_enabled=memory_enabled,
                                     usage_sink=usage,
                                 ):
                                     collected.append(token)
@@ -323,10 +333,18 @@ async def session_chat(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Conversation no longer exists.",
                     )
+                # See the streaming path: this scalar SELECT is the consent
+                # snapshot for exactly this graph run.
+                memory_enabled = await user_repo.get_memory_enabled(
+                    session,
+                    user.id,
+                )
                 reply = await chat_service.run_chat_session(
                     agent,
                     body.message,
                     thread_id,
+                    user_id=str(user.id),
+                    memory_enabled=memory_enabled,
                     usage_sink=usage,
                 )
                 await message_repo.create(
