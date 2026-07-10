@@ -26,16 +26,22 @@ def _item(user_id, category, key):
 
 
 class _Result:
-    def __init__(self, value):
+    def __init__(self, value=None, *, rowcount=0):
         self._value = value
+        self.rowcount = rowcount
 
-    def scalar_one_or_none(self):
+    def one_or_none(self):
         return self._value
 
 
 class _Db:
     def __init__(self, user, events=None):
         self.user = user
+        if user is not None:
+            if not hasattr(user, "memory_consent_version"):
+                user.memory_consent_version = 0
+            if not hasattr(user, "memory_data_epoch"):
+                user.memory_data_epoch = 0
         self.events = events if events is not None else []
         self.execute_count = 0
         self.commit_count = 0
@@ -45,12 +51,30 @@ class _Db:
     async def execute(self, statement):
         self.execute_count += 1
         self.statements.append(statement)
+        if statement.table.name == "memory_jobs":
+            self.events.append("jobs_cancel")
+            return _Result(rowcount=0)
         self.events.append("consent_write")
-        enabled = statement.compile().params["memory_enabled"]
         if self.user is None:
             return _Result(None)
+        compiled = statement.compile()
+        enabled = compiled.params["memory_enabled"]
+        if self.user.memory_enabled != enabled:
+            self.user.memory_consent_version += 1
         self.user.memory_enabled = enabled
-        return _Result(enabled)
+        updated_columns = {
+            getattr(column, "key", str(column)) for column in statement._values
+        }
+        if "memory_data_epoch" in updated_columns:
+            self.user.memory_data_epoch += 1
+        return _Result(
+            (
+                self.user.memory_enabled,
+                self.user.memory_consent_version,
+                self.user.memory_data_epoch,
+            ),
+            rowcount=1,
+        )
 
     async def commit(self):
         self.commit_count += 1
@@ -152,7 +176,9 @@ def test_set_memory_consent_uses_forced_update_returning():
     assert db.commit_count == 1
     sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
     assert "UPDATE users SET memory_enabled" in sql
-    assert "RETURNING users.memory_enabled" in sql
+    assert "users.memory_consent_version" in sql
+    assert "users.memory_data_epoch" in sql
+    assert user.memory_consent_version == 1
 
 
 def test_clear_memory_disables_before_store_access_and_batch_deletes():
@@ -172,9 +198,17 @@ def test_clear_memory_disables_before_store_access_and_batch_deletes():
 
     assert deleted == 2
     assert user.memory_enabled is False
-    assert events[:3] == ["consent_write", "commit", "consent_write"]
-    assert events[3:] == ["search", "delete", "search", "commit"]
-    assert db.execute_count == 2
+    assert events[:5] == [
+        "consent_write",
+        "jobs_cancel",
+        "commit",
+        "consent_write",
+        "jobs_cancel",
+    ]
+    assert events[5:] == ["search", "delete", "search", "commit"]
+    assert db.execute_count == 4
+    assert user.memory_consent_version == 1
+    assert user.memory_data_epoch == 1
     assert all(operation.value is None for operation in store.batches[0])
     assert store.search_calls == [
         (("memory", str(user_id)), 100, 0, False),
@@ -194,6 +228,8 @@ def test_clear_memory_is_idempotent():
     assert first == second == 0
     assert store.batches == []
     assert user.memory_enabled is False
+    assert user.memory_consent_version == 0
+    assert user.memory_data_epoch == 2
 
 
 def test_clear_memory_restarts_at_zero_across_batches_and_isolates_users():
@@ -258,7 +294,7 @@ def test_clear_memory_without_store_still_reasserts_disabled_consent():
     with pytest.raises(memory_service.MemoryStoreError, match="unavailable"):
         asyncio.run(memory_service.clear_memory(db, None, user_id))
 
-    assert db.execute_count == 2
+    assert db.execute_count == 4
     assert db.commit_count == 2
     assert user.memory_enabled is False
 

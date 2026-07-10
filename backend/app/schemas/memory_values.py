@@ -43,6 +43,7 @@ class SemanticMemoryValue(BaseModel):
     created_at: NonBlankString | None = None
     updated_at: NonBlankString | None = None
     version: int | None = Field(default=None, ge=1)
+    data_epoch: int = Field(default=0, ge=0)
 
 
 class EpisodeMemoryValue(BaseModel):
@@ -55,6 +56,7 @@ class EpisodeMemoryValue(BaseModel):
     topics: list[NonBlankString] = Field(default_factory=list, max_length=12)
     status: Literal["active", "superseded", "deleted"]
     crisis: bool
+    data_epoch: int = Field(default=0, ge=0)
     started_at: NonBlankString | None = None
     updated_at: NonBlankString | None = None
     message_count: int | None = Field(default=None, ge=0)

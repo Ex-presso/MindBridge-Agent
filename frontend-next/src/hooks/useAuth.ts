@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 
 export function useAuth() {
   const { accessToken, user, setAuth, clearAuth } = useAuthStore();
+  const userId = user?.id;
   const router = useRouter();
 
   const login = useCallback(
@@ -38,7 +39,22 @@ export function useAuth() {
     router.push("/login");
   }, [clearAuth, router]);
 
-  return { user, accessToken, isAuthenticated: !!accessToken, login, register, logout };
+  const deleteAccount = useCallback(async (password: string) => {
+    if (!userId) throw new Error("Authentication session changed.");
+    await api.auth.deleteAccount(userId, password);
+    clearAuth();
+    router.replace("/login");
+  }, [userId, clearAuth, router]);
+
+  return {
+    user,
+    accessToken,
+    isAuthenticated: !!accessToken,
+    login,
+    register,
+    logout,
+    deleteAccount,
+  };
 }
 
 async function fetchMe(token: string) {

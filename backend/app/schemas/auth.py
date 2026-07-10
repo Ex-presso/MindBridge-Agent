@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class RegisterRequest(BaseModel):
@@ -21,6 +21,12 @@ class UserResponse(BaseModel):
     id: str
     email: str
     display_name: str | None
+
+
+class DeleteAccountRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(min_length=1, max_length=128)
 
 
 class RefreshRequest(BaseModel):

@@ -7,7 +7,7 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 - **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.909 on a hand-labeled benchmark), with a bounded tool-call loop.
 - **Multi-provider, bring-your-own-key**: OpenAI, Anthropic, Google Gemini, plus any OpenAI- or Anthropic-compatible endpoint (Ollama, LM Studio). Per-user keys are Fernet-encrypted at rest.
 - **Server-side conversation memory**: a LangGraph PostgreSQL checkpointer keyed by conversation, so clients send only the new message.
-- **Opt-in long-term memory foundation**: user-scoped LangGraph Store, transparent privacy controls, and checkpoint-safe read-only Selection; automatic Extraction is intentionally not enabled yet.
+- **Opt-in long-term memory foundation**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe read-only Selection, and a durable write-safety outbox; automatic Extraction is intentionally not enabled yet.
 - **Real token-level SSE streaming** with optimistic UI updates.
 - **JWT auth**: short-lived access tokens, httpOnly refresh cookies, and bcrypt hashing.
 - **Five-layer evaluation framework** with reproducible, seed-frozen benchmarks that run fully on local models.
@@ -36,7 +36,7 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
                        │
               ┌────────▼────────┐
               │ PostgreSQL 16   │  users · conversations ·
-              │ (pgvector)      │  messages · api keys ·
+              │ (pgvector)      │  messages · api keys · memory jobs ·
               └─────────────────┘  checkpoints · embeddings
 ```
 
@@ -56,7 +56,8 @@ Alembic migration chain automatically. It also recognizes and safely adopts the
 older complete schema created by SQLAlchemy `create_all`. Unversioned schemas
 that are missing core tables or required columns stop with an actionable error
 instead of being stamped. Type and constraint fingerprinting is a later
-hardening step.
+hardening step. Migration `004` also refuses to choose between duplicate
+per-provider API keys; resolve duplicates manually and rerun the migration.
 
 Production deployments should set `AUTO_CREATE_TABLES=false` and run
 `cd backend && uv run alembic upgrade head` as an explicit release step before

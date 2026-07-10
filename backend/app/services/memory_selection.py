@@ -28,6 +28,8 @@ EpisodeSelectionStatus = Literal[
     "not_indexed",
     "not_requested",
     "query_failed",
+    "guard_unavailable",
+    "guard_failed",
 ]
 
 _DEFAULT_SEMANTIC_ITEM_CHAR_LIMIT = 280
@@ -90,6 +92,7 @@ def _validate_limits(
     episode_summary_char_limit: int,
     episode_topic_char_limit: int,
     episode_min_score: float,
+    expected_data_epoch: int,
 ) -> None:
     if semantic_limit < 0:
         raise ValueError("semantic_limit must not be negative")
@@ -101,8 +104,19 @@ def _validate_limits(
         raise ValueError("episode_summary_char_limit must be at least 1")
     if episode_topic_char_limit < 1:
         raise ValueError("episode_topic_char_limit must be at least 1")
-    if not math.isfinite(episode_min_score) or not -1 <= episode_min_score <= 1:
+    if (
+        isinstance(episode_min_score, bool)
+        or not isinstance(episode_min_score, Real)
+        or not math.isfinite(float(episode_min_score))
+        or not -1 <= float(episode_min_score) <= 1
+    ):
         raise ValueError("episode_min_score must be between -1 and 1")
+    if (
+        isinstance(expected_data_epoch, bool)
+        or not isinstance(expected_data_epoch, int)
+        or expected_data_epoch < 0
+    ):
+        raise ValueError("expected_data_epoch must be a non-negative integer")
 
 
 def _as_batch(results: Any) -> list[Any]:
@@ -150,6 +164,7 @@ def _parse_semantic_items(
     items: Sequence[Any],
     *,
     item_char_limit: int,
+    expected_data_epoch: int,
 ) -> tuple[SemanticMemory, ...]:
     selected: list[SemanticMemory] = []
     for item in items:
@@ -160,7 +175,11 @@ def _parse_semantic_items(
             parsed = SemanticMemoryValue.model_validate(dict(value))
         except ValidationError:
             continue
-        if parsed.status != "active" or not (parsed.explicit or parsed.confirmed):
+        if (
+            parsed.status != "active"
+            or parsed.data_epoch != expected_data_epoch
+            or not (parsed.explicit or parsed.confirmed)
+        ):
             continue
         if len(parsed.content) > item_char_limit:
             continue
@@ -175,6 +194,7 @@ def _parse_episode_items(
     summary_char_limit: int,
     topic_char_limit: int,
     min_score: float,
+    expected_data_epoch: int,
 ) -> tuple[EpisodeMemory, ...]:
     selected: list[EpisodeMemory] = []
     for item in items:
@@ -203,6 +223,7 @@ def _parse_episode_items(
             parsed.conversation_id != key
             or parsed.status != "active"
             or parsed.crisis
+            or parsed.data_epoch != expected_data_epoch
             or len(parsed.summary) > summary_char_limit
             or any(len(topic) > topic_char_limit for topic in parsed.topics)
         ):
@@ -231,6 +252,7 @@ async def select_memory(
     episode_summary_char_limit: int = _DEFAULT_EPISODE_SUMMARY_CHAR_LIMIT,
     episode_topic_char_limit: int = _DEFAULT_EPISODE_TOPIC_CHAR_LIMIT,
     episode_min_score: float = 0.55,
+    expected_data_epoch: int = 0,
 ) -> MemorySelection:
     """Select sanitized facts and relevant episodes for exactly one user.
 
@@ -246,6 +268,7 @@ async def select_memory(
         episode_summary_char_limit=episode_summary_char_limit,
         episode_topic_char_limit=episode_topic_char_limit,
         episode_min_score=episode_min_score,
+        expected_data_epoch=expected_data_epoch,
     )
     if store is None:
         raise MemorySelectionStoreError("Memory Store is unavailable.")
@@ -282,6 +305,7 @@ async def select_memory(
     semantic = _parse_semantic_items(
         semantic_items,
         item_char_limit=semantic_item_char_limit,
+        expected_data_epoch=expected_data_epoch,
     )
 
     if not episode_limit or not normalized_query:
@@ -326,6 +350,7 @@ async def select_memory(
         summary_char_limit=episode_summary_char_limit,
         topic_char_limit=episode_topic_char_limit,
         min_score=episode_min_score,
+        expected_data_epoch=expected_data_epoch,
     )
     logger.debug(
         "Memory Selection completed; semantic_count=%s episode_count=%s",

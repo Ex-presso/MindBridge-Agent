@@ -16,7 +16,7 @@ from langgraph.store.memory import InMemoryStore
 
 import app.core.agent.agent as agent_module
 from app.core.agent.agent import Agent, AgentRunContext
-from app.services.memory_selection import MemorySelection, SemanticMemory
+from app.services.memory_selection import EpisodeMemory, MemorySelection, SemanticMemory
 from config.settings import settings
 
 
@@ -349,6 +349,85 @@ def test_selection_guards_make_zero_store_reads(monkeypatch):
 
         select_spy.assert_not_awaited()
         assert all(store.search_count == 0 for store in stores)
+
+    asyncio.run(scenario())
+
+
+def test_episode_guard_and_data_epoch_are_invocation_scoped(monkeypatch):
+    async def scenario():
+        monkeypatch.setattr(settings, "MEMORY_ENABLED", True)
+        select_spy = AsyncMock(
+            return_value=MemorySelection(
+                episodes=(
+                    EpisodeMemory(
+                        "eligible-thread",
+                        "A guarded prior conversation",
+                        ("work",),
+                    ),
+                    EpisodeMemory(
+                        "crisis-thread",
+                        "A blocked crisis conversation",
+                        ("crisis",),
+                    ),
+                ),
+                episode_status="selected",
+            )
+        )
+        monkeypatch.setattr(agent_module, "select_memory", select_spy)
+        llm = _CapturingLLM()
+        agent = Agent(llm, checkpointer=InMemorySaver(), store=_CountingStore())
+        guard_calls = []
+
+        async def episode_guard(ids):
+            guard_calls.append(ids)
+            return {"eligible-thread"}
+
+        reply = await agent.ainvoke(
+            HumanMessage(content="work feels difficult"),
+            thread_id="current-thread",
+            user_id="user-1",
+            memory_enabled=True,
+            memory_data_epoch=9,
+            episode_guard=episode_guard,
+        )
+
+        assert reply == "safe reply"
+        assert guard_calls == [("eligible-thread", "crisis-thread")]
+        assert select_spy.await_args.kwargs["expected_data_epoch"] == 9
+        rendered = _rendered_memory(llm.calls[0])[0]
+        assert "A guarded prior conversation" in rendered
+        assert "A blocked crisis conversation" not in rendered
+
+    asyncio.run(scenario())
+
+
+def test_missing_or_failed_episode_guard_fails_closed(monkeypatch):
+    async def scenario():
+        monkeypatch.setattr(settings, "MEMORY_ENABLED", True)
+        selected = MemorySelection(
+            episodes=(EpisodeMemory("old-thread", _MEMORY_SENTINEL, ("work",)),),
+            episode_status="selected",
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "select_memory",
+            AsyncMock(return_value=selected),
+        )
+
+        async def failed_guard(_ids):
+            raise RuntimeError(_MEMORY_SENTINEL)
+
+        for index, guard in enumerate((None, failed_guard)):
+            llm = _CapturingLLM()
+            agent = Agent(llm, checkpointer=InMemorySaver(), store=_CountingStore())
+            await agent.ainvoke(
+                HumanMessage(content="work feels difficult"),
+                thread_id=f"guard-failure-{index}",
+                user_id="user-1",
+                memory_enabled=True,
+                episode_guard=guard,
+            )
+            assert _rendered_memory(llm.calls[0]) == []
 
     asyncio.run(scenario())
 

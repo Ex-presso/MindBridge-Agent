@@ -10,9 +10,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.core.auth.deps import get_current_user
+from app.core.agent.safety import detect_crisis
 from app.db.engine import get_db
 from app.db.models.user import User
-from app.db.repositories import conversation_repo, message_repo, user_repo
+from app.db.repositories import (
+    conversation_repo,
+    memory_job_repo,
+    message_repo,
+    user_repo,
+)
 from app.schemas.conversation import (
     ChatCompletionChunk,
     ChatCompletionChunkChoice,
@@ -43,6 +49,27 @@ _AGENT_CACHE: "OrderedDict[tuple, object]" = OrderedDict()
 _AGENT_CACHE_MAX = 128
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 _TITLE_UPDATE_TIMEOUT_SECONDS = 15.0
+
+
+def _episode_guard(db, user_id: uuid.UUID):
+    """Build a request-local relational eligibility check for Store episodes."""
+
+    async def guard(raw_ids: tuple[str, ...]) -> set[str]:
+        parsed_ids: list[uuid.UUID] = []
+        for raw_id in raw_ids:
+            try:
+                parsed = uuid.UUID(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if str(parsed) == raw_id:
+                parsed_ids.append(parsed)
+        return await conversation_repo.filter_memory_eligible_ids(
+            db,
+            user_id,
+            tuple(parsed_ids),
+        )
+
+    return guard
 
 
 def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: str, checkpointer, store=None):
@@ -214,6 +241,24 @@ async def session_chat(
 
     # Save user message
     await message_repo.create(db, conversation_id=conv.id, role="user", content=body.message)
+    if detect_crisis(body.message):
+        # Sticky relational tombstone: once a crisis turn occurs, no episode
+        # from this conversation may be selected again, even if Store cleanup
+        # is delayed or temporarily unavailable.
+        transitioned = await conversation_repo.mark_memory_crisis_seen(
+            db,
+            conv.id,
+            user.id,
+        )
+        if transitioned:
+            await memory_job_repo.enqueue_delete_episode(
+                db,
+                user_id=user.id,
+                conversation_id=conv.id,
+                target_revision=int(conv.memory_revision),
+                consent_version=int(user.memory_consent_version),
+                data_epoch=int(user.memory_data_epoch),
+            )
     await conversation_repo.touch(db, conv.id, model=body.model, provider=provider)
     await db.commit()
 
@@ -248,16 +293,20 @@ async def session_chat(
                                 # scalar immediately before the graph invocation,
                                 # avoiding the authenticated User object's stale
                                 # identity-map value and without locking the row.
-                                memory_enabled = await user_repo.get_memory_enabled(
+                                memory_access = await user_repo.get_memory_access_snapshot(
                                     session,
                                     user.id,
                                 )
+                                if memory_access is None:
+                                    raise RuntimeError("Authenticated user no longer exists.")
                                 async for token in chat_service.stream_chat_session(
                                     agent,
                                     body.message,
                                     thread_id,
                                     user_id=str(user.id),
-                                    memory_enabled=memory_enabled,
+                                    memory_enabled=memory_access.enabled,
+                                    memory_data_epoch=memory_access.data_epoch,
+                                    episode_guard=_episode_guard(session, user.id),
                                     usage_sink=usage,
                                 ):
                                     collected.append(token)
@@ -278,6 +327,10 @@ async def session_chat(
                                         tokens_used=usage.get("total"),
                                     )
                                     await conversation_repo.touch(session, conv.id)
+                                    await conversation_repo.increment_memory_revision(
+                                        session,
+                                        conv.id,
+                                    )
                 except Exception:
                     generation_failed = True
                     logger.exception(
@@ -335,16 +388,20 @@ async def session_chat(
                     )
                 # See the streaming path: this scalar SELECT is the consent
                 # snapshot for exactly this graph run.
-                memory_enabled = await user_repo.get_memory_enabled(
+                memory_access = await user_repo.get_memory_access_snapshot(
                     session,
                     user.id,
                 )
+                if memory_access is None:
+                    raise RuntimeError("Authenticated user no longer exists.")
                 reply = await chat_service.run_chat_session(
                     agent,
                     body.message,
                     thread_id,
                     user_id=str(user.id),
-                    memory_enabled=memory_enabled,
+                    memory_enabled=memory_access.enabled,
+                    memory_data_epoch=memory_access.data_epoch,
+                    episode_guard=_episode_guard(session, user.id),
                     usage_sink=usage,
                 )
                 await message_repo.create(
@@ -357,6 +414,7 @@ async def session_chat(
                     tokens_used=usage.get("total"),
                 )
                 await conversation_repo.touch(session, conv.id)
+                await conversation_repo.increment_memory_revision(session, conv.id)
     except HTTPException:
         raise
     except Exception as exc:

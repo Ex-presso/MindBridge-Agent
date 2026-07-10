@@ -1,5 +1,5 @@
-from collections.abc import AsyncGenerator, Sequence
-from dataclasses import dataclass, field
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from dataclasses import dataclass, field, replace
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 
@@ -30,6 +30,8 @@ from config.settings import settings
 
 if TYPE_CHECKING:
     from app.services.memory_selection import MemorySelection
+
+EpisodeEligibilityGuard = Callable[[tuple[str, ...]], Awaitable[set[str]]]
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +69,10 @@ class AgentRunContext:
 
     user_id: str | None = None
     memory_enabled: bool = False
+    memory_data_epoch: int = 0
     thread_id: str | None = None
     selection: "MemorySelection | None" = field(default=None, repr=False)
+    episode_guard: EpisodeEligibilityGuard | None = field(default=None, repr=False)
 
 
 class Agent:
@@ -329,6 +333,7 @@ class Agent:
                 episode_summary_char_limit=settings.MEMORY_EPISODE_SUMMARY_MAX_CHARS,
                 episode_topic_char_limit=settings.MEMORY_EPISODE_TOPIC_MAX_CHARS,
                 episode_min_score=settings.MEMORY_EPISODE_MIN_SCORE,
+                expected_data_epoch=context.memory_data_epoch,
             )
         except Exception as exc:
             # Durable memory is assistive context, never a prerequisite for a
@@ -339,6 +344,45 @@ class Agent:
                 type(exc).__name__,
             )
             context.selection = None
+        else:
+            selection = context.selection
+            if selection is not None and selection.episodes:
+                guard = context.episode_guard
+                if guard is None:
+                    context.selection = replace(
+                        selection,
+                        episodes=(),
+                        episode_status="guard_unavailable",
+                    )
+                else:
+                    try:
+                        requested_ids = tuple(
+                            episode.thread_id for episode in selection.episodes
+                        )
+                        allowed_ids = await guard(requested_ids)
+                        if not isinstance(allowed_ids, set) or not all(
+                            isinstance(item, str) for item in allowed_ids
+                        ):
+                            raise TypeError("Episode guard returned an invalid result.")
+                    except Exception as exc:
+                        logger.warning(
+                            "Episode memory eligibility check failed; error_type=%s",
+                            type(exc).__name__,
+                        )
+                        context.selection = replace(
+                            selection,
+                            episodes=(),
+                            episode_status="guard_failed",
+                        )
+                    else:
+                        context.selection = replace(
+                            selection,
+                            episodes=tuple(
+                                episode
+                                for episode in selection.episodes
+                                if episode.thread_id in allowed_ids
+                            ),
+                        )
         return cast(State, {})
 
     async def _chat_node(
@@ -708,13 +752,17 @@ class Agent:
         *,
         user_id: str | None = None,
         memory_enabled: bool = False,
+        memory_data_epoch: int = 0,
+        episode_guard: EpisodeEligibilityGuard | None = None,
     ) -> str:
         """Invoke with checkpointer — only pass the new message, history is in checkpoint."""
         config = {"configurable": {"thread_id": thread_id}}
         context = AgentRunContext(
             user_id=user_id,
             memory_enabled=memory_enabled,
+            memory_data_epoch=memory_data_epoch,
             thread_id=thread_id,
+            episode_guard=episode_guard,
         )
         crisis = detect_crisis(self._normalize_content(new_message.content))
         try:
@@ -746,13 +794,17 @@ class Agent:
         *,
         user_id: str | None = None,
         memory_enabled: bool = False,
+        memory_data_epoch: int = 0,
+        episode_guard: EpisodeEligibilityGuard | None = None,
     ) -> AsyncGenerator[str, None]:
         """Async generator that yields text tokens as they stream from the LLM."""
         config = {"configurable": {"thread_id": thread_id}}
         context = AgentRunContext(
             user_id=user_id,
             memory_enabled=memory_enabled,
+            memory_data_epoch=memory_data_epoch,
             thread_id=thread_id,
+            episode_guard=episode_guard,
         )
         crisis = detect_crisis(self._normalize_content(new_message.content))
         try:

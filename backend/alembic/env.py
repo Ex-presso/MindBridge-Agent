@@ -15,7 +15,7 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
 
 # Import Base and all models so metadata is populated
 from app.db.engine import Base
-from app.db.models import Conversation, Message, User, UserApiKey  # noqa: F401
+from app.db.models import Conversation, MemoryJob, Message, User, UserApiKey  # noqa: F401
 
 target_metadata = Base.metadata
 

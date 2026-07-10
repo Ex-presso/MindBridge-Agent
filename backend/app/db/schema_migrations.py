@@ -67,7 +67,43 @@ API_KEY_COLUMNS = frozenset(
     }
 )
 
-APPLICATION_TABLES = frozenset({*CORE_TABLE_COLUMNS, "user_api_keys"})
+MEMORY_JOB_COLUMNS = frozenset(
+    {
+        "id",
+        "operation",
+        "user_id",
+        "conversation_id",
+        "target_revision",
+        "consent_version",
+        "data_epoch",
+        "source_user_message_id",
+        "source_assistant_message_id",
+        "api_key_id",
+        "provider",
+        "model",
+        "base_url",
+        "status",
+        "priority",
+        "available_at",
+        "lease_until",
+        "attempts",
+        "error_code",
+        "input_tokens",
+        "output_tokens",
+        "dedupe_key",
+        "created_at",
+        "updated_at",
+    }
+)
+
+WRITE_SAFETY_COLUMNS: dict[str, frozenset[str]] = {
+    "users": frozenset({"memory_consent_version", "memory_data_epoch"}),
+    "conversations": frozenset({"memory_revision", "memory_crisis_seen"}),
+}
+
+APPLICATION_TABLES = frozenset(
+    {*CORE_TABLE_COLUMNS, "user_api_keys", "memory_jobs"}
+)
 
 # Transaction-scoped PostgreSQL advisory lock. It serializes startup migration
 # attempts across multiple app processes without requiring a persistent lock.
@@ -137,7 +173,35 @@ def decide_schema_upgrade(
             )
 
     users_columns = set(columns_by_table.get("users", ()))
-    revision = "002" if "memory_enabled" in users_columns else "001"
+    conversation_columns = set(columns_by_table.get("conversations", ()))
+    has_write_safety_marker = (
+        "memory_jobs" in present_application_tables
+        or bool(users_columns & WRITE_SAFETY_COLUMNS["users"])
+        or bool(conversation_columns & WRITE_SAFETY_COLUMNS["conversations"])
+    )
+    if has_write_safety_marker:
+        if "user_api_keys" not in present_application_tables:
+            raise LegacySchemaError(
+                "Cannot adopt incompatible unversioned write-safety schema: "
+                "user_api_keys table is missing. Migrate the database manually."
+            )
+        required_write_safety = {
+            "users": WRITE_SAFETY_COLUMNS["users"] | {"memory_enabled"},
+            "conversations": WRITE_SAFETY_COLUMNS["conversations"],
+            "memory_jobs": MEMORY_JOB_COLUMNS,
+        }
+        for table_name, required_columns in required_write_safety.items():
+            actual_columns = set(columns_by_table.get(table_name, ()))
+            missing_columns = sorted(required_columns - actual_columns)
+            if missing_columns:
+                raise LegacySchemaError(
+                    "Cannot adopt incompatible unversioned write-safety schema: "
+                    f"table {table_name!r} is missing columns {missing_columns}. "
+                    "Migrate the database manually."
+                )
+        revision = "004"
+    else:
+        revision = "002" if "memory_enabled" in users_columns else "001"
     return SchemaUpgradePlan(
         adopt_revision=revision,
         reason=f"recognized legacy create_all schema at revision {revision}",

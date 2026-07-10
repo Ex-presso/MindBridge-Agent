@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.engine import Base
@@ -9,6 +9,13 @@ from app.db.engine import Base
 
 class UserApiKey(Base):
     __tablename__ = "user_api_keys"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "provider",
+            name="uq_user_api_keys_user_id_provider",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

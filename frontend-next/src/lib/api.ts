@@ -101,6 +101,13 @@ export const api = {
       }),
     logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
     me: () => request<User>("/api/v1/auth/me"),
+    deleteAccount: (expectedUserId: string, password: string) =>
+      request<void>(
+        "/api/v1/auth/me",
+        { method: "DELETE", body: JSON.stringify({ password }) },
+        true,
+        expectedUserId,
+      ),
     tryRefresh: tryRefreshToken,
   },
   conversations: {

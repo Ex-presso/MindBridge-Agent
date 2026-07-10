@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, String, false
+from sqlalchemy import BigInteger, Boolean, DateTime, String, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.engine import Base
@@ -18,6 +18,18 @@ class User(Base):
         Boolean,
         default=False,
         server_default=false(),
+        nullable=False,
+    )
+    memory_consent_version: Mapped[int] = mapped_column(
+        BigInteger,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+    memory_data_epoch: Mapped[int] = mapped_column(
+        BigInteger,
+        default=0,
+        server_default="0",
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(

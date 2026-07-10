@@ -329,6 +329,40 @@ def test_episode_relevance_floor_keeps_score_at_threshold():
     )
 
 
+def test_data_epoch_rejects_residual_items_after_clear():
+    user_id = uuid.uuid4()
+    store = _Store(
+        semantic=[
+            _item(
+                user_id,
+                "semantic",
+                "old-fact",
+                _semantic_value(data_epoch=1),
+            )
+        ],
+        episodes=[
+            _item(
+                user_id,
+                "episodes",
+                "old-episode",
+                _episode_value("old-episode", data_epoch=1),
+            )
+        ],
+    )
+
+    stale = _run(
+        select_memory(store, user_id, "work", expected_data_epoch=2)
+    )
+    current = _run(
+        select_memory(store, user_id, "work", expected_data_epoch=1)
+    )
+
+    assert stale.semantic == ()
+    assert stale.episodes == ()
+    assert len(current.semantic) == 1
+    assert len(current.episodes) == 1
+
+
 def test_store_without_real_index_never_uses_recency_as_episode_relevance():
     user_id = uuid.uuid4()
     store = _Store(
@@ -471,6 +505,10 @@ def test_renderer_rejects_invalid_budgets(kwargs, message):
         ({"semantic_item_char_limit": 0}, "semantic_item_char_limit"),
         ({"episode_summary_char_limit": 0}, "episode_summary_char_limit"),
         ({"episode_topic_char_limit": 0}, "episode_topic_char_limit"),
+        ({"episode_min_score": None}, "episode_min_score"),
+        ({"episode_min_score": True}, "episode_min_score"),
+        ({"expected_data_epoch": -1}, "expected_data_epoch"),
+        ({"expected_data_epoch": True}, "expected_data_epoch"),
     ],
 )
 def test_selection_rejects_invalid_budgets(kwargs, message):

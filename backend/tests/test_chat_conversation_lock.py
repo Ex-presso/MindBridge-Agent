@@ -58,10 +58,19 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
     events: list[str] = []
     user_id = uuid.uuid4()
     conversation_id = uuid.uuid4()
-    conversation = SimpleNamespace(id=conversation_id, user_id=user_id)
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id=user_id,
+        memory_revision=0,
+    )
     # Simulate an authenticated ORM object loaded before a PATCH disabled
     # memory. The generation path must ignore this stale value.
-    user = SimpleNamespace(id=user_id, memory_enabled=True)
+    user = SimpleNamespace(
+        id=user_id,
+        memory_enabled=True,
+        memory_consent_version=3,
+        memory_data_epoch=4,
+    )
     request_db = AsyncMock()
 
     async def commit_request():
@@ -98,8 +107,14 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
     monkeypatch.setattr(chat_api, "_get_agent", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         chat_api.user_repo,
-        "get_memory_enabled",
-        AsyncMock(return_value=False),
+        "get_memory_access_snapshot",
+        AsyncMock(
+            return_value=chat_api.user_repo.MemoryAccessSnapshot(
+                enabled=False,
+                consent_version=3,
+                data_epoch=4,
+            )
+        ),
     )
     async def lock_conversation(db, locked_conversation_id, locked_user_id):
         lock_scope = "initial" if db is request_db else "generation"
@@ -122,6 +137,36 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
     monkeypatch.setattr(chat_api.message_repo, "create", create_message)
     monkeypatch.setattr(chat_api.conversation_repo, "touch", touch_conversation)
 
+    async def mark_crisis(db, conversation_id, user_id):
+        events.append("memory_crisis_seen")
+        return True
+
+    monkeypatch.setattr(
+        chat_api.conversation_repo,
+        "mark_memory_crisis_seen",
+        mark_crisis,
+    )
+
+    async def enqueue_delete_episode(db, **kwargs):
+        events.append("delete_episode_enqueued")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        chat_api.memory_job_repo,
+        "enqueue_delete_episode",
+        enqueue_delete_episode,
+    )
+
+    async def increment_revision(db, conversation_id):
+        events.append("memory_revision_increment")
+        return 1
+
+    monkeypatch.setattr(
+        chat_api.conversation_repo,
+        "increment_memory_revision",
+        increment_revision,
+    )
+
     return SimpleNamespace(
         body=body,
         conversation=conversation,
@@ -130,6 +175,37 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
         request_db=request_db,
         user=user,
     )
+
+
+def test_crisis_tombstone_commits_with_user_message(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=False)
+        arranged.body.message = "I want to end my life."
+
+        async def run_graph(*args, **kwargs):
+            return "Please contact emergency support now."
+
+        monkeypatch.setattr(chat_api.chat_service, "run_chat_session", run_graph)
+
+        response = await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+
+        assert response["message"]["content"].startswith("Please contact")
+        assert arranged.events.index("message_create:user") < arranged.events.index(
+            "memory_crisis_seen"
+        )
+        assert arranged.events.index("memory_crisis_seen") < arranged.events.index(
+            "delete_episode_enqueued"
+        )
+        assert arranged.events.index("delete_episode_enqueued") < arranged.events.index(
+            "request_commit"
+        )
+
+    asyncio.run(scenario())
 
 
 def test_stream_rechecks_locked_conversation_before_invoking_graph(monkeypatch):
@@ -241,11 +317,15 @@ def test_stream_persists_reply_and_releases_lock_before_done(monkeypatch):
             *,
             user_id,
             memory_enabled,
+            memory_data_epoch,
+            episode_guard,
             usage_sink,
         ):
             arranged.events.append("graph_started")
             assert user_id == str(arranged.user.id)
             assert memory_enabled is False
+            assert memory_data_epoch == 4
+            assert callable(episode_guard)
             usage_sink["total"] = 7
             yield "hello\n"
             yield "world"
@@ -308,10 +388,16 @@ def test_stream_persists_reply_and_releases_lock_before_done(monkeypatch):
 def test_nonstream_rereads_latest_consent_and_passes_run_context(monkeypatch):
     async def scenario():
         arranged = _arrange_existing_conversation(monkeypatch, stream=False)
-        consent_read = AsyncMock(return_value=False)
+        consent_read = AsyncMock(
+            return_value=chat_api.user_repo.MemoryAccessSnapshot(
+                enabled=False,
+                consent_version=5,
+                data_epoch=6,
+            )
+        )
         monkeypatch.setattr(
             chat_api.user_repo,
-            "get_memory_enabled",
+            "get_memory_access_snapshot",
             consent_read,
         )
 
@@ -322,12 +408,16 @@ def test_nonstream_rereads_latest_consent_and_passes_run_context(monkeypatch):
             *,
             user_id,
             memory_enabled,
+            memory_data_epoch,
+            episode_guard,
             usage_sink,
         ):
             arranged.events.append("graph_started")
             assert thread_id == str(arranged.conversation.id)
             assert user_id == str(arranged.user.id)
             assert memory_enabled is False
+            assert memory_data_epoch == 6
+            assert callable(episode_guard)
             assert arranged.user.memory_enabled is True
             return "complete reply"
 

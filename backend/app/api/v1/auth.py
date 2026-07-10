@@ -6,8 +6,16 @@ from app.core.auth.deps import get_current_user
 from app.core.rate_limit import limiter
 from app.db.engine import get_db
 from app.db.models.user import User
-from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, UserResponse
-from app.services import auth_service
+from app.core.auth.password import verify_password
+from app.schemas.auth import (
+    DeleteAccountRequest,
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+)
+from app.services import account_service, auth_service
 from config.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -63,3 +71,41 @@ async def logout(response: Response):
 @router.get("/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)):
     return UserResponse(id=str(user.id), email=user.email, display_name=user.display_name)
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit(settings.AUTH_RATE_LIMIT)
+async def delete_me(
+    request: Request,
+    body: DeleteAccountRequest,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete the authenticated account after password confirmation."""
+    if not verify_password(body.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials.",
+        )
+
+    try:
+        await account_service.delete_account(
+            db,
+            user.id,
+            store=getattr(request.app.state, "store", None),
+            checkpointer=getattr(request.app.state, "checkpointer", None),
+        )
+    except account_service.AccountUserNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found.",
+        ) from exc
+    except account_service.AccountDeletionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Account deletion is temporarily unavailable.",
+        ) from exc
+
+    response.delete_cookie(COOKIE_NAME)
+    response.status_code = status.HTTP_204_NO_CONTENT

@@ -24,12 +24,17 @@ def test_session_chat_services_forward_user_consent_and_thread():
         agent = _AgentSpy()
         usage = {}
 
+        async def episode_guard(ids):
+            return set(ids)
+
         reply = await chat_service.run_chat_session(
             agent,
             "hello",
             "thread-1",
             user_id="user-1",
             memory_enabled=True,
+            memory_data_epoch=7,
+            episode_guard=episode_guard,
             usage_sink=usage,
         )
         streamed = [
@@ -40,6 +45,8 @@ def test_session_chat_services_forward_user_consent_and_thread():
                 "thread-2",
                 user_id="user-2",
                 memory_enabled=False,
+                memory_data_epoch=8,
+                episode_guard=episode_guard,
                 usage_sink=usage,
             )
         ]
@@ -51,12 +58,16 @@ def test_session_chat_services_forward_user_consent_and_thread():
             "usage_sink": usage,
             "user_id": "user-1",
             "memory_enabled": True,
+            "memory_data_epoch": 7,
+            "episode_guard": episode_guard,
         }
         assert agent.stream_call[1] == {
             "thread_id": "thread-2",
             "usage_sink": usage,
             "user_id": "user-2",
             "memory_enabled": False,
+            "memory_data_epoch": 8,
+            "episode_guard": episode_guard,
         }
 
     asyncio.run(scenario())

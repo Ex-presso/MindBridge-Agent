@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useApiKeys } from "@/hooks/useApiKeys";
+import { useAuth } from "@/hooks/useAuth";
 import { useMemory } from "@/hooks/useMemory";
 import { PROVIDER_INFO } from "@/types";
 
@@ -171,6 +172,7 @@ function ProviderCard({
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { deleteAccount } = useAuth();
   const { keys, saveKey, deleteKey, keysLoading } = useApiKeys();
   const {
     memory,
@@ -181,6 +183,9 @@ export default function SettingsPage() {
   } = useMemory();
   const [memoryBusy, setMemoryBusy] = useState<"toggle" | "clear" | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountBusy, setAccountBusy] = useState(false);
 
   useEffect(() => {
     if (memoryError) {
@@ -236,6 +241,18 @@ export default function SettingsPage() {
       );
     } finally {
       setMemoryBusy(null);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!accountPassword) return;
+    setAccountBusy(true);
+    try {
+      await deleteAccount(accountPassword);
+      toast.success("Account deleted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete account");
+      setAccountBusy(false);
     }
   };
 
@@ -382,6 +399,76 @@ export default function SettingsPage() {
                       disabled={memoryBusy === "clear"}
                     >
                       {memoryBusy === "clear" ? "Clearing…" : "Clear and disable"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+        </section>
+
+        <Separator className="my-8" />
+
+        <section aria-labelledby="account-settings-title">
+          <div className="mb-4">
+            <h2 id="account-settings-title" className="text-base font-semibold text-[--destructive]">Danger zone</h2>
+            <p className="mt-1 text-xs leading-5 text-[--muted-foreground]">
+              Permanently remove your conversations, checkpoints, API keys, and all stored memory.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-[--destructive]/40 bg-[--background] p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">Delete account</p>
+                <p className="mt-1 text-xs leading-5 text-[--muted-foreground]">
+                  This action cannot be undone. External memory and conversation checkpoints are cleared before your account row is removed.
+                </p>
+              </div>
+
+              <Dialog open={accountDialogOpen} onOpenChange={(open) => {
+                setAccountDialogOpen(open);
+                if (!open && !accountBusy) setAccountPassword("");
+              }}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="destructive" className="shrink-0">
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Delete account
+                  </Button>
+                </DialogTrigger>
+                <DialogContent aria-describedby="delete-account-description">
+                  <DialogHeader>
+                    <DialogTitle>Delete your account permanently?</DialogTitle>
+                    <p id="delete-account-description" className="text-sm leading-6 text-[--muted-foreground]">
+                      Enter your password to confirm. If external cleanup is temporarily unavailable, your account stays disabled and the deletion can be retried.
+                    </p>
+                  </DialogHeader>
+                  <div>
+                    <Label htmlFor="delete-account-password">Password</Label>
+                    <Input
+                      id="delete-account-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={accountPassword}
+                      onChange={(event) => setAccountPassword(event.target.value)}
+                      disabled={accountBusy}
+                      className="mt-1"
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setAccountDialogOpen(false)}
+                      disabled={accountBusy}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleDeleteAccount}
+                      disabled={accountBusy || !accountPassword}
+                    >
+                      {accountBusy ? "Deleting…" : "Delete permanently"}
                     </Button>
                   </DialogFooter>
                 </DialogContent>

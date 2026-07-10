@@ -19,7 +19,8 @@ An `AsyncPostgresStore` is initialized alongside the checkpointer and passed to
 the compiled graph. The privacy API can inspect and clear it, and conversation
 deletion removes the matching episode key. The graph now performs read-only,
 user-scoped Selection before normal chat. There is still no automatic or
-user-facing long-term writer; Extraction is the next delivery unit.
+user-facing long-term writer. The durable write-safety outbox and invalidation
+versions are in place; structured episode Extraction is the next delivery unit.
 
 The privacy foundation is implemented:
 
@@ -29,17 +30,20 @@ The privacy foundation is implemented:
   memory is disabled, so disabling never hides retained data.
 - `PATCH /api/v1/memory` changes consent without depending on the Store.
 - `DELETE /api/v1/memory` commits consent off before Store access, then clears
-  every item under the user's prefix. Store failure is fail-closed: the request
-  reports an error, but consent remains disabled.
+  every item under the user's prefix. It advances a data epoch and cancels
+  unfinished jobs in the same first transaction. Store failure is fail-closed:
+  the request reports an error, consent remains disabled, and any residual item
+  belongs to an old epoch that Selection rejects after re-enabling.
 - The settings UI exposes status, enable/disable, stored-item count, and clear
   controls; the authenticated API returns the transparent item payloads.
 
 Read-only Selection is also implemented:
 
-- Immediately before each graph run, the chat transaction reads the current
-  scalar consent value. This is the run's linearization point: a disable that
-  completed first prevents Store access; a request that already observed
-  enabled consent may finish as an in-flight request.
+- Immediately before each graph run, the chat transaction reads consent,
+  consent version, and data epoch in one scalar row query. This is the run's
+  linearization point: a disable that completed first prevents Store access; a
+  request that already observed enabled consent may finish as an in-flight
+  request.
 - `safety_check → summarize → select_memory → chat` is deterministic harness
   flow. Crisis turns, either disabled switch, a missing user, or a missing Store
   cause zero Selection reads.
@@ -59,6 +63,14 @@ Read-only Selection is also implemented:
   using unrelated recency results. Startup performs a content-free embedding
   capability and dimension probe; semantic facts and all privacy APIs remain
   available through the key-value Store on failure.
+- Both semantic and episode Store values carry `data_epoch` (legacy/manual
+  values default to epoch `0`). Selection accepts only the authenticated user's
+  current epoch, so a failed clear cannot resurrect residual data after a later
+  re-enable.
+- Episode candidates pass a second, request-local relational guard. IDs must be
+  owned by the same user, still exist, and have `memory_crisis_seen=false`.
+  Missing or failed guards remove the whole episode batch while preserving
+  independently validated semantic facts.
 - Only approved `kind/content` and `summary/topics` fields enter a budgeted JSON
   block. Both the base system policy and the block label it as untrusted data,
   so embedded role changes, tool requests, policies, and instructions are not
@@ -67,7 +79,8 @@ Read-only Selection is also implemented:
   memory block with the rest of the LLM input, so a production deployment must
   apply the same consent, retention, and data-processor review to tracing.
 
-The `memory_enabled` column is delivered through Alembic. With the default
+The current fields and `memory_jobs` outbox are delivered through Alembic
+revision `004`. With the default
 `AUTO_CREATE_TABLES=true`, development and Docker startup safely adopt a known
 legacy `create_all` schema (when no Alembic revision exists) and upgrade it to
 head. Production keeps `AUTO_CREATE_TABLES=false` and runs
@@ -84,6 +97,37 @@ The namespace root prevents collisions with LangGraph or future subsystems;
 the normalized user ID is the isolation boundary, and the final component is
 the memory category. Inspection and deletion validate returned namespaces
 before exposing or mutating them.
+
+## Implemented write-safety foundation
+
+The writer is not enabled yet, but its concurrency and deletion primitives are
+implemented before any transcript can be sent to an extractor:
+
+- `memory_consent_version` advances only when the enabled state really changes.
+  A job captures it so disable then re-enable cannot authorize an older job.
+- `memory_data_epoch` advances on clear or account deletion. It invalidates
+  queued work and already-stored values independently of ordinary disable.
+- `conversation.memory_revision` advances only in the same SQL transaction as
+  a successfully persisted assistant reply. Failed generation, persistence,
+  commit, and canceled streams do not advance it.
+- `conversation.memory_crisis_seen` is sticky. The first deterministic crisis
+  match commits the tombstone with the user message and enqueues a high-priority
+  `delete_episode` outbox job. The relational Selection guard blocks that
+  conversation immediately; physical Store deletion will be performed by the
+  worker delivery unit.
+- `memory_jobs` is a durable outbox with operation/status constraints, source
+  and version fields, leases, retry metadata, and a unique dedupe key. Clear and
+  account deletion cancel unfinished jobs transactionally.
+- `DELETE /api/v1/auth/me` requires password confirmation. It first commits the
+  disabled/version tombstone, then locks User → Conversations, clears the whole
+  Store prefix and every known checkpoint, and only then deletes the relational
+  User so conversations, messages, API keys, and jobs cascade. External failure
+  leaves the disabled User row available for an idempotent retry. The Settings
+  danger zone exposes this flow.
+
+Revision `004` also makes `(user_id, provider)` unique for BYOK records. If an
+older database contains duplicates, migration fails transactionally and leaves
+every encrypted key untouched for an explicit operator decision.
 
 ## Architecture decision
 
@@ -113,7 +157,8 @@ write-specific invariants below are also enforced and tested:
 - Users can inspect and delete every durable memory stored about them.
 - User IDs are normalized to strings at the Store namespace boundary.
 - Deleting a conversation removes its checkpoint and associated episode.
-- Deleting a user removes all Store namespaces owned by that user.
+- Deleting a user removes all Store namespaces, known checkpoints, relational
+  conversations/messages, API keys, and jobs owned by that user.
 - Crisis-source messages and diagnostic inferences are not written to long-term
   memory in the first version.
 - Stored memory is rendered as untrusted structured data, never as executable
@@ -137,7 +182,8 @@ read before the graph defines the boundary: requests starting Selection after a
 completed disable do not read memory, while an earlier in-flight request may
 still use its prompt-local snapshot. Immediate cancellation would require a
 consent epoch plus stream cancellation, not a user-row lock held for the whole
-LLM call.
+LLM call. Writer jobs use the stricter consent version and data epoch checks, so
+this read allowance does not authorize a stale write.
 
 The LangGraph checkpoint and the relational `messages` row are still committed
 by separate database clients. A failure after the graph checkpoint succeeds but
@@ -162,9 +208,10 @@ may need for later recall.
 
 For the current manual pilot, semantic records must be written with
 `index=False` and an allow-listed value such as
-`{kind, content, status="active", explicit=true}`. Episode keys are conversation
-IDs and values contain at least
-`{conversation_id, summary, topics, status="active", crisis=false}`; their
+`{kind, content, status="active", explicit=true, data_epoch=...}`. Episode keys
+are conversation IDs and values contain at least
+`{conversation_id, summary, topics, status="active", crisis=false,
+data_epoch=...}`; their
 `summary` field is vector-indexed. There is intentionally no public write API
 until Extraction, crisis filtering, attribution, and idempotency are complete.
 
@@ -173,9 +220,12 @@ until Extraction, crisis filtering, attribution, and idempotency are complete.
 1. **Complete:** repair checkpoint deletion and compaction boundary handling.
 2. **Complete:** add consent, inspection, deletion, and schema foundations.
 3. **Complete:** add user-scoped, read-only Selection with manually seeded memories.
-4. **Next:** add independent episode summaries and idempotent Extraction.
-5. Add conflict-aware Consolidation.
-6. Add a constrained explicit-memory tool if evaluation justifies it.
-7. Run a frozen multi-session evaluation covering recall, contradiction updates,
+4. **Complete:** add version/epoch gates, sticky crisis exclusion, durable outbox,
+   and retry-safe account cascade.
+5. **Next:** add independent episode summaries and schema-validated Extraction.
+6. Add the leased outbox worker, idempotent vector upsert, and retry policy.
+7. Add conflict-aware Consolidation.
+8. Add a constrained explicit-memory tool if evaluation justifies it.
+9. Run a frozen multi-session evaluation covering recall, contradiction updates,
    irrelevant-memory rejection, user isolation, deletion, crisis filtering, and
    persistent prompt-injection attempts.

@@ -7,6 +7,8 @@ from app.db.schema_migrations import (
     API_KEY_COLUMNS,
     CORE_TABLE_COLUMNS,
     LegacySchemaError,
+    MEMORY_JOB_COLUMNS,
+    WRITE_SAFETY_COLUMNS,
     decide_schema_upgrade,
     make_alembic_config,
 )
@@ -56,7 +58,48 @@ def test_current_create_all_database_with_memory_adopts_002():
     assert plan.adopt_revision == "002"
 
 
-@pytest.mark.parametrize("revision", ["001", "002", "003"])
+def test_current_write_safety_create_all_database_adopts_004():
+    columns = _legacy_columns(memory_enabled=True)
+    columns["users"].update(WRITE_SAFETY_COLUMNS["users"])
+    columns["conversations"].update(WRITE_SAFETY_COLUMNS["conversations"])
+    columns["memory_jobs"] = set(MEMORY_JOB_COLUMNS)
+
+    plan = decide_schema_upgrade(
+        current_revisions=(),
+        existing_tables=columns,
+        columns_by_table=columns,
+    )
+
+    assert plan.adopt_revision == "004"
+
+
+def test_partial_write_safety_create_all_database_fails_closed():
+    columns = _legacy_columns(memory_enabled=True)
+    columns["users"].add("memory_data_epoch")
+
+    with pytest.raises(LegacySchemaError, match="write-safety schema"):
+        decide_schema_upgrade(
+            current_revisions=(),
+            existing_tables=columns,
+            columns_by_table=columns,
+        )
+
+
+def test_write_safety_schema_without_consent_column_fails_closed():
+    columns = _legacy_columns(memory_enabled=False)
+    columns["users"].update(WRITE_SAFETY_COLUMNS["users"])
+    columns["conversations"].update(WRITE_SAFETY_COLUMNS["conversations"])
+    columns["memory_jobs"] = set(MEMORY_JOB_COLUMNS)
+
+    with pytest.raises(LegacySchemaError, match="memory_enabled"):
+        decide_schema_upgrade(
+            current_revisions=(),
+            existing_tables=columns,
+            columns_by_table=columns,
+        )
+
+
+@pytest.mark.parametrize("revision", ["001", "002", "003", "004"])
 def test_versioned_database_never_gets_restamped(revision: str):
     plan = decide_schema_upgrade(
         current_revisions=(revision,),
@@ -103,7 +146,7 @@ def test_incompatible_unversioned_schema_fails_closed():
         )
 
 
-def test_alembic_revision_chain_has_single_003_head():
+def test_alembic_revision_chain_has_single_004_head():
     scripts = ScriptDirectory.from_config(make_alembic_config())
 
-    assert scripts.get_current_head() == "003"
+    assert scripts.get_current_head() == "004"
