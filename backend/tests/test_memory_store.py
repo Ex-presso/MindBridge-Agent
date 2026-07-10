@@ -21,6 +21,19 @@ class _FakeStore:
             raise RuntimeError("vector DDL unavailable")
 
 
+class _FakeEmbeddings:
+    def __init__(self, dims=1024, *, error=None):
+        self.dims = dims
+        self.error = error
+        self.queries = []
+
+    def embed_query(self, text):
+        self.queries.append(text)
+        if self.error is not None:
+            raise self.error
+        return [0.0] * self.dims
+
+
 def _reset_store():
     _FakeStore.instances = []
     _FakeStore.fail_indexed_setup = False
@@ -49,7 +62,7 @@ def test_global_on_initializes_summary_vector_index(monkeypatch):
     _reset_store()
     monkeypatch.setattr(memory_store.settings, "MEMORY_ENABLED", True)
     monkeypatch.setattr(memory_store.settings, "MEMORY_EMBED_DIMS", 1024)
-    embeddings = object()
+    embeddings = _FakeEmbeddings()
 
     runtime = asyncio.run(
         memory_store.initialize_memory_store(
@@ -62,6 +75,7 @@ def test_global_on_initializes_summary_vector_index(monkeypatch):
     assert runtime.vector_enabled is True
     assert runtime.store.pool == "pool"
     assert runtime.store.setup_calls == 1
+    assert embeddings.queries == ["memory index readiness probe"]
     assert runtime.store.index_config == {
         "dims": 1024,
         "embed": embeddings,
@@ -92,6 +106,42 @@ def test_embedding_failure_falls_back_to_kv(monkeypatch):
     assert runtime.store.setup_calls == 1
 
 
+def test_embedding_probe_failure_falls_back_to_kv(monkeypatch):
+    _reset_store()
+    monkeypatch.setattr(memory_store.settings, "MEMORY_ENABLED", True)
+    embeddings = _FakeEmbeddings(error=RuntimeError("service unavailable"))
+
+    runtime = asyncio.run(
+        memory_store.initialize_memory_store(
+            "pool",
+            store_factory=_FakeStore,
+            embedding_factory=lambda: embeddings,
+        )
+    )
+
+    assert runtime.vector_enabled is False
+    assert len(_FakeStore.instances) == 1
+    assert runtime.store.index_config is None
+
+
+def test_embedding_dimension_mismatch_falls_back_to_kv(monkeypatch):
+    _reset_store()
+    monkeypatch.setattr(memory_store.settings, "MEMORY_ENABLED", True)
+    monkeypatch.setattr(memory_store.settings, "MEMORY_EMBED_DIMS", 1024)
+
+    runtime = asyncio.run(
+        memory_store.initialize_memory_store(
+            "pool",
+            store_factory=_FakeStore,
+            embedding_factory=lambda: _FakeEmbeddings(dims=768),
+        )
+    )
+
+    assert runtime.vector_enabled is False
+    assert len(_FakeStore.instances) == 1
+    assert runtime.store.index_config is None
+
+
 def test_vector_setup_failure_retries_plain_store(monkeypatch):
     _reset_store()
     _FakeStore.fail_indexed_setup = True
@@ -101,7 +151,7 @@ def test_vector_setup_failure_retries_plain_store(monkeypatch):
         memory_store.initialize_memory_store(
             "pool",
             store_factory=_FakeStore,
-            embedding_factory=object,
+            embedding_factory=_FakeEmbeddings,
         )
     )
 

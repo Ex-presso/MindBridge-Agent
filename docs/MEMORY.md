@@ -44,14 +44,21 @@ Read-only Selection is also implemented:
   flow. Crisis turns, either disabled switch, a missing user, or a missing Store
   cause zero Selection reads.
 - Selection writes only to a fresh, invocation-scoped runtime context buffer
-  and returns an empty graph-state update. Tests scan every checkpoint and
-  `pending_writes` entry to ensure selected values and the rendered prompt block
-  are never copied into checkpoint persistence.
+  and returns an empty graph-state update. Tests scan every checkpoint field and
+  `pending_writes` entry to ensure application state, runner metadata, and model
+  error serialization never directly copy selected values or the rendered
+  prompt block. A model may still repeat remembered content in its normal reply
+  or tool-call arguments; those outputs are ordinary conversation state and are
+  persisted by design.
 - Semantic facts use exact namespace reads and strict, allow-listed schemas.
-  Episodes use vector similarity over `summary`; if the embedding/index path is
-  unavailable, episode recall is skipped rather than silently using unrelated
-  recency results. Semantic facts and all privacy APIs remain available through
-  the key-value Store.
+  Episodes use cosine similarity over `summary`, reject missing/invalid scores,
+  and apply the configurable `MEMORY_EPISODE_MIN_SCORE` floor before rendering.
+  The conservative default `0.55` is an initial Qwen3-Embedding-0.6B calibration
+  and must be re-evaluated when the embedding model changes. If the embedding or
+  index path is unavailable, episode recall is skipped rather than silently
+  using unrelated recency results. Startup performs a content-free embedding
+  capability and dimension probe; semantic facts and all privacy APIs remain
+  available through the key-value Store on failure.
 - Only approved `kind/content` and `summary/topics` fields enter a budgeted JSON
   block. Both the base system policy and the block label it as untrusted data,
   so embedded role changes, tool requests, policies, and instructions are not

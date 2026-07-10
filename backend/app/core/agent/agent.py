@@ -328,6 +328,7 @@ class Agent:
                 semantic_item_char_limit=settings.MEMORY_SEMANTIC_ITEM_MAX_CHARS,
                 episode_summary_char_limit=settings.MEMORY_EPISODE_SUMMARY_MAX_CHARS,
                 episode_topic_char_limit=settings.MEMORY_EPISODE_TOPIC_MAX_CHARS,
+                episode_min_score=settings.MEMORY_EPISODE_MIN_SCORE,
             )
         except Exception as exc:
             # Durable memory is assistive context, never a prerequisite for a
@@ -436,14 +437,31 @@ class Agent:
                     llm_input.append(SystemMessage(content=memory_context))
         llm_input.extend(working_messages)
 
-        response = await self.llm.ainvoke(llm_input)
-        return cast(
-            State,
-            {
-                "messages": [response],
-                "tool_iterations": tool_iterations,
-            },
-        )
+        try:
+            response = await self.llm.ainvoke(llm_input)
+        except Exception as exc:
+            # Some provider exceptions include a repr of the complete request.
+            # LangGraph persists node failures in checkpoint pending_writes, so
+            # allowing that exception through could serialize prompt-local
+            # durable memory. Preserve only the error class in logs and expose
+            # a constant exception whose message contains no request content.
+            logger.warning(
+                "Chat model invocation failed; error_type=%s",
+                type(exc).__name__,
+            )
+        else:
+            return cast(
+                State,
+                {
+                    "messages": [response],
+                    "tool_iterations": tool_iterations,
+                },
+            )
+
+        # Raise after leaving the exception handler so the sanitized exception
+        # has no __context__ link to a provider error that may contain the
+        # complete prompt. ``from None`` also suppresses chained formatting.
+        raise RuntimeError("Chat model invocation failed.") from None
 
     async def _tool_node(self, state: State) -> State:
         messages = list(state["messages"])

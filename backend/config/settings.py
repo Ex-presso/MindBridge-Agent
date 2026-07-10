@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     MEMORY_ENABLED: bool = False
     MEMORY_SELECT_SEMANTIC_LIMIT: int = Field(default=12, ge=1, le=100)
     MEMORY_SELECT_EPISODE_TOP_K: int = Field(default=3, ge=1, le=20)
+    MEMORY_EPISODE_MIN_SCORE: float = Field(default=0.55, ge=-1, le=1)
     MEMORY_SEMANTIC_ITEM_MAX_CHARS: int = Field(default=280, ge=50, le=2000)
     MEMORY_EPISODE_SUMMARY_MAX_CHARS: int = Field(default=800, ge=100, le=5000)
     MEMORY_EPISODE_TOPIC_MAX_CHARS: int = Field(default=80, ge=10, le=500)

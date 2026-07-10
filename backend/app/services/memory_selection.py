@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import json
 import logging
+import math
+from numbers import Real
 from typing import Any, Literal, get_args
 import uuid
 
@@ -87,6 +89,7 @@ def _validate_limits(
     semantic_item_char_limit: int,
     episode_summary_char_limit: int,
     episode_topic_char_limit: int,
+    episode_min_score: float,
 ) -> None:
     if semantic_limit < 0:
         raise ValueError("semantic_limit must not be negative")
@@ -98,6 +101,8 @@ def _validate_limits(
         raise ValueError("episode_summary_char_limit must be at least 1")
     if episode_topic_char_limit < 1:
         raise ValueError("episode_topic_char_limit must be at least 1")
+    if not math.isfinite(episode_min_score) or not -1 <= episode_min_score <= 1:
+        raise ValueError("episode_min_score must be between -1 and 1")
 
 
 def _as_batch(results: Any) -> list[Any]:
@@ -169,9 +174,21 @@ def _parse_episode_items(
     current_thread_id: str | None,
     summary_char_limit: int,
     topic_char_limit: int,
+    min_score: float,
 ) -> tuple[EpisodeMemory, ...]:
     selected: list[EpisodeMemory] = []
     for item in items:
+        score = getattr(item, "score", None)
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, Real)
+            or not math.isfinite(float(score))
+            or float(score) < min_score
+        ):
+            # A vector top-k always returns the nearest rows, even when every
+            # row is unrelated. Missing, invalid, and low cosine scores are
+            # therefore rejected rather than treated as relevant memory.
+            continue
         key = str(getattr(item, "key", ""))
         if not key or (current_thread_id is not None and key == current_thread_id):
             continue
@@ -213,6 +230,7 @@ async def select_memory(
     semantic_item_char_limit: int = _DEFAULT_SEMANTIC_ITEM_CHAR_LIMIT,
     episode_summary_char_limit: int = _DEFAULT_EPISODE_SUMMARY_CHAR_LIMIT,
     episode_topic_char_limit: int = _DEFAULT_EPISODE_TOPIC_CHAR_LIMIT,
+    episode_min_score: float = 0.55,
 ) -> MemorySelection:
     """Select sanitized facts and relevant episodes for exactly one user.
 
@@ -227,6 +245,7 @@ async def select_memory(
         semantic_item_char_limit=semantic_item_char_limit,
         episode_summary_char_limit=episode_summary_char_limit,
         episode_topic_char_limit=episode_topic_char_limit,
+        episode_min_score=episode_min_score,
     )
     if store is None:
         raise MemorySelectionStoreError("Memory Store is unavailable.")
@@ -306,6 +325,7 @@ async def select_memory(
         current_thread_id=normalized_thread_id,
         summary_char_limit=episode_summary_char_limit,
         topic_char_limit=episode_topic_char_limit,
+        min_score=episode_min_score,
     )
     logger.debug(
         "Memory Selection completed; semantic_count=%s episode_count=%s",

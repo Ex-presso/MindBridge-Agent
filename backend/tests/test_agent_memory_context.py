@@ -43,6 +43,12 @@ class _CapturingLLM:
         return self._responses.pop(0)
 
 
+class _RequestEchoingFailureLLM(_CapturingLLM):
+    async def ainvoke(self, messages):
+        self.calls.append(list(messages))
+        raise ValueError(f"provider rejected request: {messages!r}")
+
+
 class _CountingStore(InMemoryStore):
     def __init__(self) -> None:
         super().__init__()
@@ -90,6 +96,19 @@ def _rendered_memory(messages: Sequence[BaseMessage]) -> list[str]:
         if isinstance(message, SystemMessage)
         and _MEMORY_PREAMBLE in str(message.content)
     ]
+
+
+def _persisted_checkpoint_repr(checkpoint) -> str:
+    return "".join(
+        repr(value)
+        for value in (
+            checkpoint.config,
+            checkpoint.checkpoint,
+            checkpoint.metadata,
+            checkpoint.pending_writes,
+            checkpoint.parent_config,
+        )
+    )
 
 
 def test_run_context_repr_never_contains_selected_memory():
@@ -184,7 +203,7 @@ def test_selected_memory_is_prompt_local_and_never_checkpointed(monkeypatch):
         ]
         assert checkpoints
         for checkpoint in checkpoints:
-            persisted = repr(checkpoint.checkpoint) + repr(checkpoint.pending_writes)
+            persisted = _persisted_checkpoint_repr(checkpoint)
             assert _MEMORY_SENTINEL not in persisted
             assert _MEMORY_PREAMBLE not in persisted
 
@@ -226,9 +245,69 @@ def test_tool_loop_reuses_one_selection_without_persisting_prompt(monkeypatch):
             {"configurable": {"thread_id": "thread-tool"}}
         )
         assert checkpoint is not None
-        persisted = repr(checkpoint.checkpoint) + repr(checkpoint.pending_writes)
+        persisted = _persisted_checkpoint_repr(checkpoint)
         assert _MEMORY_SENTINEL not in persisted
         assert _MEMORY_PREAMBLE not in persisted
+
+    asyncio.run(scenario())
+
+
+def test_model_failure_never_persists_prompt_local_memory(monkeypatch):
+    async def invoke_and_assert_failure(agent, *, stream: bool, thread_id: str):
+        try:
+            if stream:
+                async for _ in agent.astream_tokens(
+                    HumanMessage(content="I feel stressed."),
+                    thread_id=thread_id,
+                    user_id="user-1",
+                    memory_enabled=True,
+                ):
+                    pass
+            else:
+                await agent.ainvoke(
+                    HumanMessage(content="I feel stressed."),
+                    thread_id=thread_id,
+                    user_id="user-1",
+                    memory_enabled=True,
+                )
+        except RuntimeError as exc:
+            assert str(exc) == "Chat model invocation failed."
+            assert exc.__cause__ is None
+            assert exc.__context__ is None
+            assert exc.__suppress_context__ is True
+        else:  # pragma: no cover - makes an unexpected success explicit
+            raise AssertionError("Expected the model invocation to fail")
+
+    async def scenario():
+        monkeypatch.setattr(settings, "MEMORY_ENABLED", True)
+        store = _CountingStore()
+        _put_semantic(store, "user-1", _MEMORY_SENTINEL)
+        checkpointer = InMemorySaver()
+        agent = Agent(
+            _RequestEchoingFailureLLM(),
+            checkpointer=checkpointer,
+            store=store,
+        )
+
+        await invoke_and_assert_failure(agent, stream=False, thread_id="failure-invoke")
+        await invoke_and_assert_failure(agent, stream=True, thread_id="failure-stream")
+
+        for thread_id in ("failure-invoke", "failure-stream"):
+            checkpoints = [
+                checkpoint
+                async for checkpoint in checkpointer.alist(
+                    {"configurable": {"thread_id": thread_id}}
+                )
+            ]
+            assert checkpoints
+            assert any(
+                "Chat model invocation failed." in repr(checkpoint.pending_writes)
+                for checkpoint in checkpoints
+            )
+            for checkpoint in checkpoints:
+                persisted = _persisted_checkpoint_repr(checkpoint)
+                assert _MEMORY_SENTINEL not in persisted
+                assert _MEMORY_PREAMBLE not in persisted
 
     asyncio.run(scenario())
 

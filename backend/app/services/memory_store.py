@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from numbers import Real
 from typing import Any
 
 from langgraph.store.postgres.aio import AsyncPostgresStore
@@ -23,6 +25,25 @@ class MemoryStoreRuntime:
     vector_enabled: bool
 
 
+def _validate_probe_vector(vector: Any, *, expected_dims: int) -> None:
+    """Reject an unavailable or dimension-mismatched embedding backend."""
+    if isinstance(vector, (str, bytes)):
+        raise ValueError("Embedding probe returned an invalid vector.")
+    try:
+        values = list(vector)
+    except TypeError as exc:
+        raise ValueError("Embedding probe returned an invalid vector.") from exc
+    if len(values) != expected_dims:
+        raise ValueError("Embedding probe dimension does not match MEMORY_EMBED_DIMS.")
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, Real)
+        or not math.isfinite(float(value))
+        for value in values
+    ):
+        raise ValueError("Embedding probe returned non-finite values.")
+
+
 async def initialize_memory_store(
     pool: Any,
     *,
@@ -39,6 +60,14 @@ async def initialize_memory_store(
     if settings.MEMORY_ENABLED:
         try:
             embeddings = await asyncio.to_thread(embedding_factory)
+            probe = await asyncio.to_thread(
+                embeddings.embed_query,
+                "memory index readiness probe",
+            )
+            _validate_probe_vector(
+                probe,
+                expected_dims=settings.MEMORY_EMBED_DIMS,
+            )
             indexed_store = store_factory(
                 pool,
                 index={

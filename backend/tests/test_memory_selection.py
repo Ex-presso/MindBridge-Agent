@@ -19,11 +19,12 @@ from app.services.memory_selection import (
 )
 
 
-def _item(user_id, category, key, value):
+def _item(user_id, category, key, value, *, score=1.0):
     return SimpleNamespace(
         namespace=("memory", str(user_id), category),
         key=key,
         value=value,
+        score=score,
     )
 
 
@@ -275,6 +276,56 @@ def test_invalid_crisis_and_mismatched_episodes_are_discarded():
 
     assert selection.episodes == (
         EpisodeMemory("valid", "A valid synopsis", ("work",)),
+    )
+
+
+@pytest.mark.parametrize("score", [None, float("nan"), True, 0.549])
+def test_episode_relevance_floor_rejects_missing_invalid_and_low_scores(score):
+    user_id = uuid.uuid4()
+    store = _Store(
+        episodes=[
+            _item(
+                user_id,
+                "episodes",
+                "unrelated",
+                _episode_value("unrelated"),
+                score=score,
+            )
+        ]
+    )
+
+    selection = _run(
+        select_memory(store, user_id, "current topic", episode_min_score=0.55)
+    )
+
+    assert selection.episodes == ()
+    assert selection.episode_status == "selected"
+
+
+def test_episode_relevance_floor_keeps_score_at_threshold():
+    user_id = uuid.uuid4()
+    store = _Store(
+        episodes=[
+            _item(
+                user_id,
+                "episodes",
+                "relevant",
+                _episode_value("relevant"),
+                score=0.55,
+            )
+        ]
+    )
+
+    selection = _run(
+        select_memory(store, user_id, "current topic", episode_min_score=0.55)
+    )
+
+    assert selection.episodes == (
+        EpisodeMemory(
+            "relevant",
+            "Work pressure was high and a short walk helped.",
+            ("work", "walking"),
+        ),
     )
 
 
