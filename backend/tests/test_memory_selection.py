@@ -8,6 +8,8 @@ import uuid
 
 import pytest
 
+from app.schemas.episode_extraction import EpisodeClaim
+from app.schemas.memory_values import EpisodeMemoryValue
 from app.services.memory_selection import (
     EpisodeMemory,
     MemoryNamespaceViolationError,
@@ -41,12 +43,24 @@ def _semantic_value(**overrides):
 
 
 def _episode_value(conversation_id="thread-old", **overrides):
+    summary = overrides.get(
+        "summary",
+        "Work pressure was high and a short walk helped.",
+    )
     value = {
         "conversation_id": conversation_id,
-        "summary": "Work pressure was high and a short walk helped.",
-        "topics": ["work", "walking"],
+        "summary": summary,
+        "claims": [
+            {
+                "claim": summary,
+                "evidence_message_id": "00000000-0000-0000-0000-000000000001",
+                "evidence_quote": summary,
+            }
+        ],
+        "topics": ["Work", "walk"],
         "status": "active",
         "crisis": False,
+        "target_revision": 1,
     }
     value.update(overrides)
     return value
@@ -125,7 +139,7 @@ def test_selects_only_exact_user_namespace_and_excludes_current_episode():
         EpisodeMemory(
             "thread-old",
             "Work pressure was high and a short walk helped.",
-            ("work", "walking"),
+            ("Work", "walk"),
         ),
     )
     assert selection.episode_status == "selected"
@@ -253,6 +267,15 @@ def test_invalid_crisis_and_mismatched_episodes_are_discarded():
             _item(
                 user_id,
                 "episodes",
+                "ungrounded-topic",
+                _episode_value(
+                    "ungrounded-topic",
+                    topics=["user has a secret child"],
+                ),
+            ),
+            _item(
+                user_id,
+                "episodes",
                 "long",
                 _episode_value("long", summary="x" * 21),
             ),
@@ -260,7 +283,7 @@ def test_invalid_crisis_and_mismatched_episodes_are_discarded():
                 user_id,
                 "episodes",
                 "valid",
-                _episode_value("valid", summary="A valid synopsis", topics=["work"]),
+                _episode_value("valid", summary="A valid synopsis", topics=["valid"]),
             ),
         ]
     )
@@ -275,8 +298,30 @@ def test_invalid_crisis_and_mismatched_episodes_are_discarded():
     )
 
     assert selection.episodes == (
-        EpisodeMemory("valid", "A valid synopsis", ("work",)),
+        EpisodeMemory("valid", "A valid synopsis", ("valid",)),
     )
+
+
+def test_episode_store_value_copies_validated_sequences_to_immutable_tuples():
+    value = EpisodeMemoryValue.model_validate(_episode_value())
+
+    assert isinstance(value.claims, tuple)
+    assert isinstance(value.topics, tuple)
+    with pytest.raises(AttributeError):
+        value.claims.append(value.claims[0])
+
+    unsafe_claim = EpisodeClaim.model_construct(
+        claim="unsafe",
+        evidence_message_id="not-a-uuid",
+        evidence_quote="unsafe",
+    )
+    unsafe = _episode_value(
+        summary="unsafe",
+        claims=[unsafe_claim],
+        topics=[],
+    )
+    with pytest.raises(ValueError, match="canonical UUID"):
+        EpisodeMemoryValue.model_validate(unsafe)
 
 
 @pytest.mark.parametrize("score", [None, float("nan"), True, 0.549])
@@ -324,7 +369,7 @@ def test_episode_relevance_floor_keeps_score_at_threshold():
         EpisodeMemory(
             "relevant",
             "Work pressure was high and a short walk helped.",
-            ("work", "walking"),
+            ("Work", "walk"),
         ),
     )
 

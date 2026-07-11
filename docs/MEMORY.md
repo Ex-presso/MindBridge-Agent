@@ -20,7 +20,8 @@ the compiled graph. The privacy API can inspect and clear it, and conversation
 deletion removes the matching episode key. The graph now performs read-only,
 user-scoped Selection before normal chat. There is still no automatic or
 user-facing long-term writer. The durable write-safety outbox and invalidation
-versions are in place; structured episode Extraction is the next delivery unit.
+versions are in place. A pure structured episode Extraction core is implemented,
+but no production request enqueues it and it cannot write to Store.
 
 The privacy foundation is implemented:
 
@@ -39,11 +40,13 @@ The privacy foundation is implemented:
 
 Read-only Selection is also implemented:
 
-- Immediately before each graph run, the chat transaction reads consent,
-  consent version, and data epoch in one scalar row query. This is the run's
-  linearization point: a disable that completed first prevents Store access; a
-  request that already observed enabled consent may finish as an in-flight
-  request.
+- Immediately before each graph run, the chat transaction takes a
+  `User FOR KEY SHARE` barrier and reads consent, consent version, data epoch,
+  and the account-deletion tombstone from that row. It then reloads the current
+  BYOK record before constructing the Agent. This statement is the run's
+  memory linearization point: a disable that completed first prevents Store
+  access; a request that already observed enabled consent may finish as an
+  in-flight request.
 - `safety_check → summarize → select_memory → chat` is deterministic harness
   flow. Crisis turns, either disabled switch, a missing user, or a missing Store
   cause zero Selection reads.
@@ -68,7 +71,8 @@ Read-only Selection is also implemented:
   current epoch, so a failed clear cannot resurrect residual data after a later
   re-enable.
 - Episode candidates pass a second, request-local relational guard. IDs must be
-  owned by the same user, still exist, and have `memory_crisis_seen=false`.
+  owned by the same user, still exist, have `memory_crisis_seen=false`, and have
+  completed a review with the current deterministic crisis-detector version.
   Missing or failed guards remove the whole episode batch while preserving
   independently validated semantic facts.
 - Only approved `kind/content` and `summary/topics` fields enter a budgeted JSON
@@ -79,11 +83,13 @@ Read-only Selection is also implemented:
   memory block with the rest of the LLM input, so a production deployment must
   apply the same consent, retention, and data-processor review to tracing.
 
-The current fields and `memory_jobs` outbox are delivered through Alembic
-revision `004`. With the default
+The write-safety fields and `memory_jobs` outbox start at Alembic revision `004`;
+the ownership and account-deletion hardening is revision `005`. With the default
 `AUTO_CREATE_TABLES=true`, development and Docker startup safely adopt a known
-legacy `create_all` schema (when no Alembic revision exists) and upgrade it to
-head. Production keeps `AUTO_CREATE_TABLES=false` and runs
+pre-write-safety `create_all` schema (when no Alembic revision exists) and
+upgrade it to head. An unversioned schema with any write-safety marker is not
+stamped from columns alone because that cannot prove checks, foreign keys, or
+unique constraints. Production keeps `AUTO_CREATE_TABLES=false` and runs
 `uv run alembic upgrade head` as an explicit deployment step.
 
 All durable memory belongs under one application-owned namespace:
@@ -101,7 +107,8 @@ before exposing or mutating them.
 ## Implemented write-safety foundation
 
 The writer is not enabled yet, but its concurrency and deletion primitives are
-implemented before any transcript can be sent to an extractor:
+implemented before any production transcript can be sent automatically to an
+extractor:
 
 - `memory_consent_version` advances only when the enabled state really changes.
   A job captures it so disable then re-enable cannot authorize an older job.
@@ -110,24 +117,61 @@ implemented before any transcript can be sent to an extractor:
 - `conversation.memory_revision` advances only in the same SQL transaction as
   a successfully persisted assistant reply. Failed generation, persistence,
   commit, and canceled streams do not advance it.
+- A stream or non-stream provider response containing no non-whitespace
+  assistant content is also a failed generation: no assistant row is written
+  and `memory_revision` does not advance. The streaming endpoint emits a safe
+  error frame and never emits `[DONE]` on that path.
 - `conversation.memory_crisis_seen` is sticky. The first deterministic crisis
   match commits the tombstone with the user message and enqueues a high-priority
   `delete_episode` outbox job. The relational Selection guard blocks that
   conversation immediately; physical Store deletion will be performed by the
   worker delivery unit.
+- Existing conversations are migrated with `memory_crisis_reviewed=false` and
+  `memory_crisis_review_version=0`, so they remain ineligible. On their next
+  user turn, the complete relational user history is scanned by the current
+  bilingual deterministic crisis detector under the Conversation lock. The
+  current `CRISIS_DETECTOR_VERSION` is `3`; only a completed clean review at
+  that version makes the conversation eligible. A future detector-version bump
+  automatically forces another review before Selection or Extraction.
 - `memory_jobs` is a durable outbox with operation/status constraints, source
   and version fields, leases, retry metadata, and a unique dedupe key. Clear and
-  account deletion cancel unfinished jobs transactionally.
+  account deletion cancel unfinished jobs transactionally. Composite foreign
+  keys prove that its Conversation, source messages, API key, and User belong
+  together; matching child indexes keep cascades bounded.
 - `DELETE /api/v1/auth/me` requires password confirmation. It first commits the
-  disabled/version tombstone, then locks User → Conversations, clears the whole
-  Store prefix and every known checkpoint, and only then deletes the relational
-  User so conversations, messages, API keys, and jobs cascade. External failure
-  leaves the disabled User row available for an idempotent retry. The Settings
-  danger zone exposes this flow.
+  disabled/version tombstone with `account_deletion_pending=true`, then locks
+  User → Conversations, clears the whole Store prefix and every known
+  checkpoint, and only then deletes the relational User so conversations,
+  messages, API keys, and jobs cascade. The tombstone blocks new chat and memory
+  consent work; per-user Agent cache entries and title tasks are purged before
+  and after cleanup. External failure leaves the disabled pending User row
+  available for an idempotent retry. The endpoint has a bounded deadline and
+  returns retryable `503` rather than waiting forever on an uncooperative task.
+  The Settings danger zone exposes this flow.
+- API-key replacement and deletion purge the user's cached Agents and title
+  tasks, then take `User FOR UPDATE`. Chat and title generation hold
+  `User FOR KEY SHARE`, reload the current credential, and explicitly close
+  provider streams before releasing the transaction. A successful credential
+  mutation therefore cannot be followed by a new outbound call using the old
+  key. Runtime eviction and the subsequent strong-lock wait are both bounded;
+  timeout rolls back and returns retryable `503`.
+- SQLAlchemy is pinned to PostgreSQL `READ COMMITTED`. The barrier protocol
+  depends on the statement after a blocked row lock receiving a fresh snapshot;
+  moving to snapshot isolation requires an explicit credential/account epoch.
 
 Revision `004` also makes `(user_id, provider)` unique for BYOK records. If an
 older database contains duplicates, migration fails transactionally and leaves
-every encrypted key untouched for an explicit operator decision.
+every encrypted key untouched for an explicit operator decision. Runtime upsert
+infers those columns instead of relying on a particular historical constraint
+name. Revision `005` adds the composite ownership constraints and deletion
+barrier described above. Downgrade preflights refuse to erase non-default
+versions, epochs, crisis tombstones, revisions, jobs, or an account-deletion
+tombstone, and revision `005` also refuses to discard an incomplete/outdated
+historical crisis review. The preflight first locks affected parent and child
+tables so concurrent writes cannot cross the check-to-DDL boundary. An operator
+must migrate that state explicitly before rolling back. The BYOK uniqueness
+constraint is intentionally retained across a `004 → 003` downgrade because
+the migration cannot prove whether an equivalent legacy constraint predated it.
 
 ## Architecture decision
 
@@ -137,7 +181,9 @@ primitive. Memory behavior remains application-controlled:
 1. **Selection** reads user-confirmed context and relevant prior episodes before
    a normal response. The read-only stage is implemented.
 2. **Extraction** derives narrowly scoped, attributable memory candidates after
-   completed turns.
+   completed turns. Its pure structured-draft and deterministic filtering core
+   is implemented, but no request currently enqueues an extraction job and no
+   worker writes a draft to Store.
 3. **Consolidation** resolves duplicates, contradictions, and stale entries at a
    controlled cadence.
 
@@ -146,12 +192,54 @@ calls. Their LLM-generated outputs are still probabilistic and must be validated
 against strict schemas. A constrained `save_memory` tool may be added only after
 the automatic path and privacy controls are stable.
 
+The implemented Extraction core accepts supplied source-message records plus an
+optional prior `EpisodeDraft`, but places only **user-role** records in the model
+prompt; supplied assistant records are ignored and cannot become evidence. The
+future worker must reload every current and historical citation from the
+relational `(user_id, conversation_id)` scope before calling this pure core. The
+core exact-matches those supplied records and never consumes assistant replies,
+the LangGraph compaction summary, or the current Selection buffer. Each claim
+carries a canonical `evidence_message_id` and an exact `evidence_quote`; the
+claim itself must occur inside that quote, and every topic must be an exact span
+of a validated claim. A model cannot silently mutate a previously cited claim.
+`summary` is a deterministic join of the validated claims rather than another
+model-authored field. The future Store value must persist those immutable claims
+together with `target_revision`, so the worker can reject stale overwrites.
+
+OpenAI, Anthropic, Gemini, and compatible BYOK endpoints are wrapped with strict
+structured output, a 2,048-token cap, a 30-second invocation timeout, and a
+second Pydantic validation pass even when the provider returns an apparent model
+instance. Extraction explicitly disables LangSmith callbacks and tracing. Raw
+responses, transcript bodies, parsing exception text, and provider payloads are
+never logged or returned. Endpoint schema capability is checked at invocation
+time. Parsing/filtering failures return bounded content-safe codes; unsupported
+schema, timeout, and invocation failures raise sanitized typed exceptions for
+the future worker's retry classifier.
+
+Before any provider call, the whole draft is rejected if a supplied or prior
+source trips the bilingual deterministic crisis detector. NFKC-normalized
+diagnosis and persisted-instruction filters run after parsing; common text
+whitespace is JSON-escaped while NUL, format, and other unsafe control
+characters are rejected. Filtered or invalid drafts are not persisted. Model
+invocation and Store writing remain separate future steps, so this core does not
+yet send production transcripts or create durable memory.
+
+An LM Studio probe on 2026-07-11 confirmed that `/v1/models` and the
+OpenAI-compatible chat endpoint are reachable. The loaded
+`nvidia/nemotron-3-nano-4b` preset placed schema JSON only in
+`reasoning_content` while leaving standard `message.content` empty, even with
+thinking disabled. That preset is therefore rejected for Extraction; MindBridge
+does not parse private reasoning as a compatibility fallback. It remains usable
+for generator evaluation, and Extraction requires a model/preset that returns
+the schema in standard structured content.
+
 ## Privacy invariants
 
 Mental-health conversations are sensitive. The implemented foundation enforces
 consent, inspection, user-scoped deletion, and conversation cleanup before any
-long-term writer exists. Extraction must not ship until the remaining
-write-specific invariants below are also enforced and tested:
+long-term writer exists. Automatic Extraction and Store writing must not ship
+until the remaining write-specific invariants below are also enforced and
+tested:
 
 - Memory is explicitly enabled per user and can be disabled immediately.
 - Users can inspect and delete every durable memory stored about them.
@@ -164,26 +252,41 @@ write-specific invariants below are also enforced and tested:
 - Stored memory is rendered as untrusted structured data, never as executable
   instructions.
 
-Conversation generation and deletion use the same `SELECT ... FOR UPDATE` row
-lock. If generation owns the lock, deletion waits and then removes the final
-checkpoint and episode. If deletion owns it, a waiting generation rechecks the
-row, sees that it is gone, and never invokes the graph. External Store and
-checkpoint cleanup happens before the relational delete; failures propagate so
-the remaining row makes the idempotent operation safe to retry.
+Every chat transaction takes a `User FOR KEY SHARE` deletion barrier before any
+Conversation lock or child-FK insert. Account deletion takes `User FOR UPDATE`,
+commits the pending tombstone, and then reacquires User → Conversations in the
+same global order. A chat that entered first completes or releases its barrier;
+a chat that arrives later sees pending/deleted state and never invokes the
+graph. Generation and deletion also share the Conversation `FOR UPDATE` lock,
+so deletion waits for an in-flight graph and removes its final checkpoint.
+External Store and checkpoint cleanup happens before the relational delete;
+failures propagate so the pending row makes the idempotent operation safe to
+retry.
 
 This deliberately holds a database connection and row lock for the duration of
 one generation. It serializes concurrent runs for the same conversation while
 allowing different conversations to proceed independently. That cost is
 acceptable for the current deployment and should be revisited if long-running
-streams or per-conversation concurrency become common.
+streams or per-conversation concurrency become common. Stream cancellation
+explicitly closes the router, service, Agent, and provider async generators
+inside-out before the transaction releases its row locks.
 
-Consent changes do not cancel an already-running response. The fresh scalar
-read before the graph defines the boundary: requests starting Selection after a
-completed disable do not read memory, while an earlier in-flight request may
-still use its prompt-local snapshot. Immediate cancellation would require a
-consent epoch plus stream cancellation, not a user-row lock held for the whole
-LLM call. Writer jobs use the stricter consent version and data epoch checks, so
-this read allowance does not authorize a stale write.
+The database barrier and fresh credential lookup protect outbound calls across
+backend processes. Per-user Agent eviction and title-task cancellation are
+process-local: another replica can retain an idle decrypted Agent object until
+its LRU eviction even though it cannot use that object for a post-mutation call.
+A deployment that requires prompt cross-replica in-memory erasure needs a shared
+invalidation channel or credential epoch.
+
+Consent changes do not cancel an already-running response. The fresh
+`READ COMMITTED` User-row read before the graph defines the boundary: requests
+starting Selection after a completed disable do not read memory, while an
+earlier in-flight request may still use its prompt-local snapshot. The
+generation's `FOR KEY SHARE` barrier blocks account deletion and API-key
+mutation but remains compatible with a non-key consent update; immediate
+response cancellation would require a consent epoch plus stream cancellation.
+Writer jobs use the stricter consent version and data epoch checks, so this read
+allowance does not authorize a stale write.
 
 The LangGraph checkpoint and the relational `messages` row are still committed
 by separate database clients. A failure after the graph checkpoint succeeds but
@@ -210,10 +313,15 @@ For the current manual pilot, semantic records must be written with
 `index=False` and an allow-listed value such as
 `{kind, content, status="active", explicit=true, data_epoch=...}`. Episode keys
 are conversation IDs and values contain at least
-`{conversation_id, summary, topics, status="active", crisis=false,
-data_epoch=...}`; their
+`{conversation_id, claims=[{claim, evidence_message_id, evidence_quote}],
+summary, topics, target_revision, status="active", crisis=false,
+data_epoch=...}`; `summary` must equal the deterministic join of `claims`, and its
 `summary` field is vector-indexed. There is intentionally no public write API
 until Extraction, crisis filtering, attribution, and idempotency are complete.
+Legacy manual episode values containing only `summary/topics` remain visible to
+the privacy inspection and deletion APIs, but Selection now rejects them
+fail-closed. They must be re-derived with grounded `claims` and a
+`target_revision` before they can be recalled again.
 
 ## Delivery order
 
@@ -222,10 +330,41 @@ until Extraction, crisis filtering, attribution, and idempotency are complete.
 3. **Complete:** add user-scoped, read-only Selection with manually seeded memories.
 4. **Complete:** add version/epoch gates, sticky crisis exclusion, durable outbox,
    and retry-safe account cascade.
-5. **Next:** add independent episode summaries and schema-validated Extraction.
-6. Add the leased outbox worker, idempotent vector upsert, and retry policy.
+5. **Complete:** add the pure structured episode draft, user-evidence grounding,
+   deterministic crisis/diagnosis/instruction filters, and sanitized failures.
+6. **Next:** enqueue extraction jobs for completed turns and add the leased
+   worker, idempotent vector upsert, and retry policy.
 7. Add conflict-aware Consolidation.
 8. Add a constrained explicit-memory tool if evaluation justifies it.
 9. Run a frozen multi-session evaluation covering recall, contradiction updates,
    irrelevant-memory rejection, user isolation, deletion, crisis filtering, and
    persistent prompt-injection attempts.
+
+## Human review handoff (2026-07-11)
+
+The review boundary is intentionally limited to the safety foundation and the
+pure Extraction core. Review commit `9e971d4` together with the immediately
+following Extraction/documentation commit. In particular, verify the global
+User → Conversation lock order, migration `004`/`005` downgrade guards, stream
+closure and terminal-frame semantics, evidence exact-matching, and the
+crisis/diagnosis/persistent-instruction filters.
+
+The current automated evidence is `347 passed, 5 skipped` for the complete
+backend suite, plus a passing frontend TypeScript check and targeted lint for
+the changed settings files. OrbStack is the active Docker context and its
+PostgreSQL service is healthy. The final full backend/frontend image rebuild is
+not part of this handoff snapshot.
+
+No production endpoint currently sends transcripts to Extraction, and no
+worker writes Episode values to LangGraph Store. The next implementation unit
+must add transactional enqueueing, relational source reload, leased retries,
+fresh consent/data/revision/crisis gates immediately before the provider and
+Store write, and an idempotent stale-write-resistant upsert. Those items remain
+open for human design review before implementation resumes.
+
+`README.md` and this file are the tracked, authoritative documentation in the
+handoff commits. `docs/develop.md`, `docs/system_arch.md`, and
+`docs/memory_design.md` are intentionally excluded by the repository's existing
+`.gitignore`; the first two are synchronized local workspace references, while
+`memory_design.md` preserves the earlier design exploration rather than current
+implementation status.

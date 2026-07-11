@@ -7,7 +7,16 @@ the context rendered for the chat model.
 
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+from app.schemas.episode_extraction import EpisodeClaim, EpisodeDraft
 
 
 NonBlankString: TypeAlias = Annotated[
@@ -53,18 +62,32 @@ class EpisodeMemoryValue(BaseModel):
 
     conversation_id: NonBlankString
     summary: NonBlankString
-    topics: list[NonBlankString] = Field(default_factory=list, max_length=12)
+    claims: tuple[EpisodeClaim, ...] = Field(min_length=1, max_length=12)
+    topics: tuple[NonBlankString, ...] = Field(default_factory=tuple, max_length=12)
     status: Literal["active", "superseded", "deleted"]
     crisis: bool
+    target_revision: int = Field(ge=1)
     data_epoch: int = Field(default=0, ge=0)
     started_at: NonBlankString | None = None
     updated_at: NonBlankString | None = None
     message_count: int | None = Field(default=None, ge=0)
 
+    @field_validator("claims", "topics", mode="before")
+    @classmethod
+    def sequences_must_be_copied_to_immutable_tuples(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
+
     @field_validator("topics")
     @classmethod
-    def topics_must_be_unique(cls, value: list[str]) -> list[str]:
+    def topics_must_be_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         """Reject ambiguous duplicate topic lists at the persistence boundary."""
         if len(set(value)) != len(value):
             raise ValueError("topics must be unique")
         return value
+
+    @model_validator(mode="after")
+    def summary_must_match_claims(self) -> "EpisodeMemoryValue":
+        draft = EpisodeDraft(claims=self.claims, topics=self.topics)
+        if self.summary != draft.summary:
+            raise ValueError("episode summary must be derived from claims")
+        return self

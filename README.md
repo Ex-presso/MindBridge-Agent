@@ -7,7 +7,7 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 - **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.909 on a hand-labeled benchmark), with a bounded tool-call loop.
 - **Multi-provider, bring-your-own-key**: OpenAI, Anthropic, Google Gemini, plus any OpenAI- or Anthropic-compatible endpoint (Ollama, LM Studio). Per-user keys are Fernet-encrypted at rest.
 - **Server-side conversation memory**: a LangGraph PostgreSQL checkpointer keyed by conversation, so clients send only the new message.
-- **Opt-in long-term memory foundation**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe read-only Selection, and a durable write-safety outbox; automatic Extraction is intentionally not enabled yet.
+- **Opt-in long-term memory foundation**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe read-only Selection, a durable write-safety outbox, and a schema-validated Extraction core; automatic writing is intentionally not enabled yet.
 - **Real token-level SSE streaming** with optimistic UI updates.
 - **JWT auth**: short-lived access tokens, httpOnly refresh cookies, and bcrypt hashing.
 - **Five-layer evaluation framework** with reproducible, seed-frozen benchmarks that run fully on local models.
@@ -42,22 +42,40 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 
 ## Quick Start
 
-Requires [Docker Compose](https://docs.docker.com/get-docker/) and an LLM API key (OpenAI, Anthropic, or Gemini).
+Requires [Docker Compose](https://docs.docker.com/get-docker/) and access to an
+LLM provider—either an API credential (OpenAI, Anthropic, or Gemini) or a local
+OpenAI-compatible server such as LM Studio.
 
 ```bash
 cp backend/.env.example backend/.env   # set SECRET_KEY for production
 docker compose up -d
 ```
 
+On macOS with OrbStack, select it first with `docker context use orbstack`.
+That step is not needed on Linux/Windows or when another Docker context is
+intentionally in use. This workspace is tested with OrbStack rather than Colima.
+
 Open [http://localhost:3000](http://localhost:3000), create an account, add your API key under **Settings**, and start chatting. The backend runs at `:8080`, with interactive API docs at [http://localhost:8080/docs](http://localhost:8080/docs).
 
+For LM Studio, verify the OpenAI-compatible server on the host with
+`curl http://127.0.0.1:1234/v1/models`. In Settings choose
+`openai_compatible`, copy an exact model ID from that response, and enter a
+non-empty placeholder API key if the local server does not require auth. Use
+`http://127.0.0.1:1234/v1` when the backend runs directly on the host, but use
+`http://host.docker.internal:1234/v1` when the backend runs in
+Compose/OrbStack—container-local `127.0.0.1` does not reach LM Studio on macOS.
+
 With the default `AUTO_CREATE_TABLES=true`, local and Docker startup runs the
-Alembic migration chain automatically. It also recognizes and safely adopts the
-older complete schema created by SQLAlchemy `create_all`. Unversioned schemas
-that are missing core tables or required columns stop with an actionable error
-instead of being stamped. Type and constraint fingerprinting is a later
-hardening step. Migration `004` also refuses to choose between duplicate
-per-provider API keys; resolve duplicates manually and rerun the migration.
+Alembic migration chain automatically. It recognizes the known pre-write-safety
+schemas created by SQLAlchemy `create_all` and upgrades them from revision `001`
+or `002`. Partial schemas and any unversioned layout carrying `004`/`005`
+write-safety markers stop with an actionable error instead of being stamped by
+column names alone; operators must verify its types and constraints before an
+explicit stamp. Full type and constraint fingerprinting for older `001`/`002`
+layouts remains a later hardening step. Migration `004` also refuses to choose
+between duplicate per-provider API keys; resolve duplicates manually and rerun
+the migration. Revision `005` adds account-deletion barriers, historical crisis
+review, and database-enforced outbox ownership.
 
 Production deployments should set `AUTO_CREATE_TABLES=false` and run
 `cd backend && uv run alembic upgrade head` as an explicit release step before
