@@ -10,7 +10,7 @@ from sqlalchemy import case, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.user import User
-from app.db.repositories import memory_job_repo
+from app.db.repositories import memory_job_repo, user_repo
 
 
 MemoryCategory: TypeAlias = Literal["semantic", "episodes"]
@@ -38,6 +38,7 @@ class MemoryGateState:
     enabled: bool
     consent_version: int
     data_epoch: int
+    account_deletion_pending: bool = False
 
 
 def memory_namespace(
@@ -132,6 +133,8 @@ async def _write_memory_consent(
     *,
     enabled: bool,
     bump_data_epoch: bool = False,
+    account_deletion_pending: bool | None = None,
+    require_account_active: bool = False,
 ) -> MemoryGateState:
     """Force a consent write and hold the row lock until transaction end.
 
@@ -153,15 +156,20 @@ async def _write_memory_consent(
     }
     if bump_data_epoch:
         values["memory_data_epoch"] = User.memory_data_epoch + 1
+    if account_deletion_pending is not None:
+        values["account_deletion_pending"] = account_deletion_pending
 
+    statement = update(User).where(User.id == user_id)
+    if require_account_active:
+        statement = statement.where(User.account_deletion_pending.is_(False))
     result = await db.execute(
-        update(User)
-        .where(User.id == user_id)
+        statement
         .values(**values)
         .returning(
             User.memory_enabled,
             User.memory_consent_version,
             User.memory_data_epoch,
+            User.account_deletion_pending,
         )
     )
     row = result.one_or_none()
@@ -171,6 +179,7 @@ async def _write_memory_consent(
         enabled=bool(row[0]),
         consent_version=int(row[1]),
         data_epoch=int(row[2]),
+        account_deletion_pending=bool(row[3]),
     )
 
 
@@ -181,7 +190,12 @@ async def set_memory_consent(
     enabled: bool,
 ) -> bool:
     """Atomically change only the user's consent flag."""
-    stored = await _write_memory_consent(db, user_id, enabled=enabled)
+    stored = await _write_memory_consent(
+        db,
+        user_id,
+        enabled=enabled,
+        require_account_active=True,
+    )
     await db.commit()
     return stored.enabled
 
@@ -202,13 +216,38 @@ async def invalidate_memory_for_deletion(
     return state
 
 
-async def lock_memory_disabled(
+async def begin_account_deletion(
     db: AsyncSession,
     user_id: uuid.UUID,
 ) -> MemoryGateState:
-    """Hold the user row disabled and cancel unfinished jobs until commit."""
-    state = await _write_memory_consent(db, user_id, enabled=False)
+    """Strong-lock User, commit tombstone/epoch, and block new chat FK work."""
+    if not await user_repo.lock_for_account_deletion(db, user_id):
+        raise MemoryUserNotFoundError("User not found.")
+    state = await _write_memory_consent(
+        db,
+        user_id,
+        enabled=False,
+        bump_data_epoch=True,
+        account_deletion_pending=True,
+    )
     await memory_job_repo.cancel_unfinished_for_user(db, user_id)
+    await db.commit()
+    return state
+
+
+async def lock_account_deletion(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> MemoryGateState:
+    """Reacquire the strong tombstone lock before child resources are locked."""
+    if not await user_repo.lock_for_account_deletion(db, user_id):
+        raise MemoryUserNotFoundError("User not found.")
+    state = await _write_memory_consent(
+        db,
+        user_id,
+        enabled=False,
+        account_deletion_pending=True,
+    )
     return state
 
 

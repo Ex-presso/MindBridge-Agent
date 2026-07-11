@@ -5,6 +5,7 @@ import uuid
 
 from sqlalchemy.dialects import postgresql
 
+from app.db.models.memory_job import MemoryJob
 from app.db.repositories import memory_job_repo
 
 
@@ -27,6 +28,47 @@ class _Db:
 
     async def flush(self):
         self.flush_count += 1
+
+
+def test_memory_job_ownership_foreign_keys_have_matching_child_indexes():
+    table = MemoryJob.__table__
+    foreign_keys = {
+        constraint.name: tuple(column.name for column in constraint.columns)
+        for constraint in table.foreign_key_constraints
+    }
+    indexes = {
+        index.name: tuple(column.name for column in index.columns)
+        for index in table.indexes
+    }
+
+    assert foreign_keys["fk_memory_jobs_conversation_owner"] == (
+        "conversation_id",
+        "user_id",
+    )
+    assert foreign_keys["fk_memory_jobs_user_message_conversation"] == (
+        "source_user_message_id",
+        "conversation_id",
+    )
+    assert foreign_keys["fk_memory_jobs_assistant_message_conversation"] == (
+        "source_assistant_message_id",
+        "conversation_id",
+    )
+    assert foreign_keys["fk_memory_jobs_api_key_owner"] == (
+        "api_key_id",
+        "user_id",
+    )
+    assert indexes["ix_memory_jobs_conversation_revision"][:1] == (
+        "conversation_id",
+    )
+    assert indexes["ix_memory_jobs_user_message_conversation"] == foreign_keys[
+        "fk_memory_jobs_user_message_conversation"
+    ]
+    assert indexes[
+        "ix_memory_jobs_assistant_message_conversation"
+    ] == foreign_keys["fk_memory_jobs_assistant_message_conversation"]
+    assert indexes["ix_memory_jobs_api_key_user"] == foreign_keys[
+        "fk_memory_jobs_api_key_owner"
+    ]
 
 
 def test_cancel_unfinished_jobs_clears_lease_and_uses_terminal_status():

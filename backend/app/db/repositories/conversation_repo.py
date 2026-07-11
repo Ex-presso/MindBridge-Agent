@@ -5,6 +5,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.conversation import Conversation
+from app.core.agent.safety import CRISIS_DETECTOR_VERSION
 
 
 async def create(db: AsyncSession, *, user_id: uuid.UUID, title: str = "New conversation", model: str | None = None, provider: str | None = None) -> Conversation:
@@ -65,6 +66,9 @@ async def filter_memory_eligible_ids(
             Conversation.user_id == user_id,
             Conversation.id.in_(conversation_ids),
             Conversation.memory_crisis_seen.is_(False),
+            Conversation.memory_crisis_reviewed.is_(True),
+            Conversation.memory_crisis_review_version
+            == CRISIS_DETECTOR_VERSION,
         )
     )
     return {str(conversation_id) for conversation_id in result.scalars().all()}
@@ -83,10 +87,43 @@ async def mark_memory_crisis_seen(
             Conversation.user_id == user_id,
             Conversation.memory_crisis_seen.is_(False),
         )
-        .values(memory_crisis_seen=True)
+        .values(
+            memory_crisis_seen=True,
+            memory_crisis_reviewed=True,
+            memory_crisis_review_version=CRISIS_DETECTOR_VERSION,
+        )
         .returning(Conversation.id)
     )
     return result.scalar_one_or_none() is not None
+
+
+async def record_memory_crisis_review(
+    db: AsyncSession,
+    conv_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    crisis_seen: bool,
+) -> bool:
+    """Persist the one-time full-history crisis review under the row lock."""
+    result = await db.execute(
+        update(Conversation)
+        .where(
+            Conversation.id == conv_id,
+            Conversation.user_id == user_id,
+        )
+        .values(
+            memory_crisis_seen=(
+                True if crisis_seen else Conversation.memory_crisis_seen
+            ),
+            memory_crisis_reviewed=True,
+            memory_crisis_review_version=CRISIS_DETECTOR_VERSION,
+        )
+        .returning(Conversation.memory_crisis_seen)
+    )
+    final_value = result.scalar_one_or_none()
+    if final_value is None:
+        raise LookupError("Conversation no longer exists.")
+    return bool(final_value)
 
 
 async def increment_memory_revision(

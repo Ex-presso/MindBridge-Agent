@@ -9,6 +9,7 @@ class _AgentSpy:
     def __init__(self) -> None:
         self.nonstream_call = None
         self.stream_call = None
+        self.stream_closed = False
 
     async def ainvoke(self, message, **kwargs):
         self.nonstream_call = (message, kwargs)
@@ -16,7 +17,11 @@ class _AgentSpy:
 
     async def astream_tokens(self, message, **kwargs):
         self.stream_call = (message, kwargs)
-        yield "token"
+        try:
+            yield "token"
+            yield "second"
+        finally:
+            self.stream_closed = True
 
 
 def test_session_chat_services_forward_user_consent_and_thread():
@@ -52,7 +57,8 @@ def test_session_chat_services_forward_user_consent_and_thread():
         ]
 
         assert reply == "reply"
-        assert streamed == ["token"]
+        assert streamed == ["token", "second"]
+        assert agent.stream_closed is True
         assert agent.nonstream_call[1] == {
             "thread_id": "thread-1",
             "usage_sink": usage,
@@ -69,5 +75,25 @@ def test_session_chat_services_forward_user_consent_and_thread():
             "memory_data_epoch": 8,
             "episode_guard": episode_guard,
         }
+
+    asyncio.run(scenario())
+
+
+def test_chat_service_closes_agent_stream_when_consumer_disconnects():
+    async def scenario():
+        agent = _AgentSpy()
+        stream = chat_service.stream_chat_session(
+            agent,
+            "hello",
+            "thread-1",
+            user_id="user-1",
+            memory_enabled=False,
+        )
+
+        assert await anext(stream) == "token"
+        assert agent.stream_closed is False
+        await stream.aclose()
+
+        assert agent.stream_closed is True
 
     asyncio.run(scenario())

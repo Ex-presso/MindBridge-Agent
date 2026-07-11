@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.repositories import conversation_repo, user_repo
+from app.db.repositories import conversation_repo, memory_job_repo, user_repo
 from app.services import memory_service
 
 
@@ -32,7 +32,7 @@ async def delete_account(
     external operation is idempotent, so a partial failure is safe to retry.
     """
     try:
-        await memory_service.invalidate_memory_for_deletion(db, user_id)
+        await memory_service.begin_account_deletion(db, user_id)
     except memory_service.MemoryUserNotFoundError as exc:
         raise AccountUserNotFoundError("User not found.") from exc
     except Exception as exc:
@@ -42,8 +42,12 @@ async def delete_account(
     try:
         # Fixed lock order: User → Conversations. Chat never takes a User row
         # lock after its Conversation lock, so it cannot form the reverse edge.
-        await memory_service.lock_memory_disabled(db, user_id)
+        await memory_service.lock_account_deletion(db, user_id)
         conversations = await conversation_repo.list_owned_for_update(db, user_id)
+        # Global lock order is User → Conversations → MemoryJob. Keeping job
+        # cancellation after the conversation locks prevents a cascade-delete
+        # transaction from forming the reverse Conversation → Job edge.
+        await memory_job_repo.cancel_unfinished_for_user(db, user_id)
 
         if store is None or checkpointer is None:
             raise AccountDeletionError("Account storage cleanup is unavailable.")

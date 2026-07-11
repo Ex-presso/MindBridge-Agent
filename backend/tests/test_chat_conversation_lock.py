@@ -62,6 +62,9 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
         id=conversation_id,
         user_id=user_id,
         memory_revision=0,
+        memory_crisis_seen=False,
+        memory_crisis_reviewed=True,
+        memory_crisis_review_version=chat_api.CRISIS_DETECTOR_VERSION,
     )
     # Simulate an authenticated ORM object loaded before a PATCH disabled
     # memory. The generation path must ignore this stale value.
@@ -107,7 +110,7 @@ def _arrange_existing_conversation(monkeypatch, *, stream: bool):
     monkeypatch.setattr(chat_api, "_get_agent", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         chat_api.user_repo,
-        "get_memory_access_snapshot",
+        "get_memory_access_for_chat",
         AsyncMock(
             return_value=chat_api.user_repo.MemoryAccessSnapshot(
                 enabled=False,
@@ -208,6 +211,113 @@ def test_crisis_tombstone_commits_with_user_message(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_legacy_conversation_reviews_full_history_before_memory_eligibility(
+    monkeypatch,
+):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=False)
+        arranged.conversation.memory_crisis_reviewed = False
+        historical_crisis = SimpleNamespace(
+            role="user",
+            content="I want to end my life.",
+        )
+        current_message = SimpleNamespace(role="user", content="hello")
+        monkeypatch.setattr(
+            chat_api.message_repo,
+            "list_by_conversation",
+            AsyncMock(return_value=[historical_crisis, current_message]),
+        )
+
+        async def record_review(db, conversation_id, user_id, *, crisis_seen):
+            arranged.events.append(f"history_review:{crisis_seen}")
+            return crisis_seen
+
+        monkeypatch.setattr(
+            chat_api.conversation_repo,
+            "record_memory_crisis_review",
+            record_review,
+        )
+        monkeypatch.setattr(
+            chat_api.chat_service,
+            "run_chat_session",
+            AsyncMock(return_value="complete reply"),
+        )
+
+        response = await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+
+        assert response["message"]["content"] == "complete reply"
+        assert arranged.events.index("message_create:user") < arranged.events.index(
+            "history_review:True"
+        )
+        assert arranged.events.index("history_review:True") < arranged.events.index(
+            "delete_episode_enqueued"
+        )
+        assert arranged.events.index("delete_episode_enqueued") < arranged.events.index(
+            "request_commit"
+        )
+        assert arranged.conversation.memory_crisis_seen is True
+        assert arranged.conversation.memory_crisis_reviewed is True
+
+    asyncio.run(scenario())
+
+
+def test_outdated_clean_crisis_review_is_refreshed_without_delete_job(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=False)
+        arranged.conversation.memory_crisis_reviewed = True
+        arranged.conversation.memory_crisis_review_version = 0
+        monkeypatch.setattr(
+            chat_api.message_repo,
+            "list_by_conversation",
+            AsyncMock(
+                return_value=[
+                    SimpleNamespace(role="user", content="A normal prior turn."),
+                    SimpleNamespace(role="user", content="hello"),
+                ]
+            ),
+        )
+
+        async def record_review(db, conversation_id, user_id, *, crisis_seen):
+            arranged.events.append(f"history_review:{crisis_seen}")
+            return crisis_seen
+
+        monkeypatch.setattr(
+            chat_api.conversation_repo,
+            "record_memory_crisis_review",
+            record_review,
+        )
+        monkeypatch.setattr(
+            chat_api.chat_service,
+            "run_chat_session",
+            AsyncMock(return_value="complete reply"),
+        )
+
+        await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+
+        assert "history_review:False" in arranged.events
+        assert "delete_episode_enqueued" not in arranged.events
+        assert arranged.conversation.memory_crisis_seen is False
+        assert arranged.conversation.memory_crisis_reviewed is True
+        assert arranged.conversation.memory_crisis_review_version == (
+            chat_api.CRISIS_DETECTOR_VERSION
+        )
+        assert arranged.events.index("history_review:False") < arranged.events.index(
+            "request_commit"
+        )
+
+    asyncio.run(scenario())
+
+
 def test_stream_rechecks_locked_conversation_before_invoking_graph(monkeypatch):
     async def scenario():
         arranged = _arrange_existing_conversation(monkeypatch, stream=True)
@@ -242,10 +352,7 @@ def test_stream_rechecks_locked_conversation_before_invoking_graph(monkeypatch):
         )
         frames = [_sse_payload(frame) async for frame in response.body_iterator]
 
-        assert frames == [
-            {"error": "Conversation no longer exists."},
-            "[DONE]",
-        ]
+        assert frames == [{"error": "Conversation no longer exists."}]
         assert arranged.events == [
             "conversation_lock:initial",
             "message_create:user",
@@ -385,6 +492,64 @@ def test_stream_persists_reply_and_releases_lock_before_done(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_empty_stream_is_a_generation_failure_without_done(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=True)
+        monkeypatch.setattr(
+            chat_api.conversation_repo,
+            "get_owned_for_update",
+            AsyncMock(return_value=arranged.conversation),
+        )
+
+        async def empty_stream(*args, **kwargs):
+            if False:
+                yield "unreachable"
+
+        monkeypatch.setattr(
+            chat_api.chat_service,
+            "stream_chat_session",
+            empty_stream,
+        )
+
+        response = await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+        frames = [_sse_payload(frame) async for frame in response.body_iterator]
+
+        assert frames == [{"error": "Generation failed."}]
+        assert "message_create:assistant" not in arranged.events
+        assert "memory_revision_increment" not in arranged.events
+
+    asyncio.run(scenario())
+
+
+def test_empty_nonstream_reply_is_not_persisted(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=False)
+        monkeypatch.setattr(
+            chat_api.chat_service,
+            "run_chat_session",
+            AsyncMock(return_value=" \n\t"),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await chat_api.session_chat(
+                arranged.request,
+                arranged.body,
+                arranged.user,
+                arranged.request_db,
+            )
+
+        assert exc_info.value.status_code == 500
+        assert "message_create:assistant" not in arranged.events
+        assert "memory_revision_increment" not in arranged.events
+
+    asyncio.run(scenario())
+
+
 def test_nonstream_rereads_latest_consent_and_passes_run_context(monkeypatch):
     async def scenario():
         arranged = _arrange_existing_conversation(monkeypatch, stream=False)
@@ -397,7 +562,7 @@ def test_nonstream_rereads_latest_consent_and_passes_run_context(monkeypatch):
         )
         monkeypatch.setattr(
             chat_api.user_repo,
-            "get_memory_access_snapshot",
+            "get_memory_access_for_chat",
             consent_read,
         )
 
@@ -431,7 +596,7 @@ def test_nonstream_rereads_latest_consent_and_passes_run_context(monkeypatch):
         )
 
         assert response["message"]["content"] == "complete reply"
-        consent_read.assert_awaited_once()
+        assert consent_read.await_count == 2
         read_session, read_user_id = consent_read.await_args.args
         assert read_session is arranged.request.app.state.db_session()
         assert read_user_id == arranged.user.id
@@ -441,6 +606,96 @@ def test_nonstream_rereads_latest_consent_and_passes_run_context(monkeypatch):
         assert arranged.events.index("graph_started") < arranged.events.index(
             "message_create:assistant"
         )
+
+    asyncio.run(scenario())
+
+
+def test_nonstream_reloads_current_api_key_inside_user_barrier(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=False)
+        old_key = SimpleNamespace(
+            api_key_encrypted="old-ciphertext",
+            base_url="https://old.example/v1",
+        )
+        current_key = SimpleNamespace(
+            api_key_encrypted="current-ciphertext",
+            base_url="https://current.example/v1",
+        )
+        get_key = AsyncMock(side_effect=[old_key, current_key])
+        monkeypatch.setattr(
+            chat_api.api_key_repo,
+            "get_by_provider",
+            get_key,
+        )
+        monkeypatch.setattr(
+            "app.core.auth.encryption.decrypt_value",
+            lambda value: f"decrypted:{value}",
+        )
+        agent_calls = []
+
+        def get_agent(*args, **kwargs):
+            agent_calls.append((args, kwargs))
+            return object()
+
+        monkeypatch.setattr(chat_api, "_get_agent", get_agent)
+        monkeypatch.setattr(
+            chat_api.chat_service,
+            "run_chat_session",
+            AsyncMock(return_value="complete reply"),
+        )
+
+        response = await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+
+        assert response["message"]["content"] == "complete reply"
+        assert get_key.await_count == 2
+        assert len(agent_calls) == 1
+        args, kwargs = agent_calls[0]
+        assert args[:4] == (
+            "openai",
+            "test-model",
+            "https://current.example/v1",
+            "decrypted:current-ciphertext",
+        )
+        assert kwargs["user_id"] == str(arranged.user.id)
+
+    asyncio.run(scenario())
+
+
+def test_stream_stops_if_api_key_was_deleted_before_generation(monkeypatch):
+    async def scenario():
+        arranged = _arrange_existing_conversation(monkeypatch, stream=True)
+        initial_key = SimpleNamespace(
+            api_key_encrypted="old-ciphertext",
+            base_url=None,
+        )
+        monkeypatch.setattr(
+            chat_api.api_key_repo,
+            "get_by_provider",
+            AsyncMock(side_effect=[initial_key, None]),
+        )
+        stream_graph = AsyncMock()
+        monkeypatch.setattr(
+            chat_api.chat_service,
+            "stream_chat_session",
+            stream_graph,
+        )
+
+        response = await chat_api.session_chat(
+            arranged.request,
+            arranged.body,
+            arranged.user,
+            arranged.request_db,
+        )
+        frames = [_sse_payload(frame) async for frame in response.body_iterator]
+
+        assert frames == [{"error": "API key no longer available."}]
+        stream_graph.assert_not_awaited()
+        assert "message_create:assistant" not in arranged.events
 
     asyncio.run(scenario())
 
@@ -475,7 +730,6 @@ def test_failed_partial_stream_is_not_persisted(monkeypatch):
         assert frames == [
             {"delta": "partial"},
             {"error": "Generation failed."},
-            "[DONE]",
         ]
         assert arranged.events.count("message_create:user") == 1
         assert "message_create:assistant" not in arranged.events
@@ -485,7 +739,10 @@ def test_failed_partial_stream_is_not_persisted(monkeypatch):
 
 
 @pytest.mark.parametrize("failure_stage", ["assistant_save", "transaction_commit"])
-def test_stream_persistence_failure_emits_error_and_done(monkeypatch, failure_stage):
+def test_stream_persistence_failure_emits_error_without_done(
+    monkeypatch,
+    failure_stage,
+):
     async def scenario():
         arranged = _arrange_existing_conversation(monkeypatch, stream=True)
         monkeypatch.setattr(
@@ -531,7 +788,6 @@ def test_stream_persistence_failure_emits_error_and_done(monkeypatch, failure_st
         assert frames == [
             {"delta": "generated reply"},
             {"error": "Generation failed."},
-            "[DONE]",
         ]
         assert "message_create:assistant" in arranged.events
         if failure_stage == "assistant_save":
@@ -660,8 +916,11 @@ def test_client_disconnect_exits_generation_transaction(monkeypatch):
         )
 
         async def endless_stream(*args, **kwargs):
-            yield "first"
-            yield "second"
+            try:
+                yield "first"
+                yield "second"
+            finally:
+                arranged.events.append("child_stream_closed")
 
         monkeypatch.setattr(
             chat_api.chat_service,
@@ -679,6 +938,9 @@ def test_client_disconnect_exits_generation_transaction(monkeypatch):
         await response.body_iterator.aclose()
 
         assert _sse_payload(first_frame) == {"delta": "first"}
+        assert arranged.events.index("child_stream_closed") < arranged.events.index(
+            "transaction_exit:rollback:GeneratorExit"
+        )
         assert "transaction_exit:rollback:GeneratorExit" in arranged.events
         assert "session_exit" in arranged.events
         assert "message_create:assistant" not in arranged.events

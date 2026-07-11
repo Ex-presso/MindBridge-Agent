@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from app.services import account_service, auth_service
 from config.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+_ACCOUNT_DELETION_TIMEOUT_SECONDS = 30.0
 
 COOKIE_NAME = "refresh_token"
 COOKIE_OPTS = {
@@ -85,27 +87,43 @@ async def delete_me(
     """Permanently delete the authenticated account after password confirmation."""
     if not verify_password(body.password, user.hashed_password):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid credentials.",
         )
 
+    # Imported lazily to avoid the auth/chat router import cycle.
+    from app.api.v1.chat import evict_user_runtime
+
+    await evict_user_runtime(user.id)
     try:
-        await account_service.delete_account(
-            db,
-            user.id,
-            store=getattr(request.app.state, "store", None),
-            checkpointer=getattr(request.app.state, "checkpointer", None),
-        )
-    except account_service.AccountUserNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found.",
-        ) from exc
-    except account_service.AccountDeletionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Account deletion is temporarily unavailable.",
-        ) from exc
+        try:
+            async with asyncio.timeout(_ACCOUNT_DELETION_TIMEOUT_SECONDS):
+                await account_service.delete_account(
+                    db,
+                    user.id,
+                    store=getattr(request.app.state, "store", None),
+                    checkpointer=getattr(request.app.state, "checkpointer", None),
+                )
+        except account_service.AccountUserNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found.",
+            ) from exc
+        except account_service.AccountDeletionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Account deletion is temporarily unavailable.",
+            ) from exc
+        except TimeoutError:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Account deletion is temporarily unavailable.",
+            ) from None
+    finally:
+        # Catch title work scheduled by an in-flight chat while deletion waited
+        # on that conversation's row lock.
+        await evict_user_runtime(user.id)
 
     response.delete_cookie(COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT

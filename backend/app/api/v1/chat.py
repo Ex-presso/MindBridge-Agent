@@ -5,15 +5,17 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.core.auth.deps import get_current_user
-from app.core.agent.safety import detect_crisis
+from app.core.agent.safety import CRISIS_DETECTOR_VERSION, detect_crisis
 from app.db.engine import get_db
 from app.db.models.user import User
 from app.db.repositories import (
+    api_key_repo,
     conversation_repo,
     memory_job_repo,
     message_repo,
@@ -36,11 +38,11 @@ from config.settings import settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Cache compiled agents by (provider, model, base_url, key-hash, checkpointer).
+# Cache compiled agents by (user, provider, model, base_url, key-hash, runtime).
 # The LangGraph graph is stateless — per-conversation state lives in the
-# checkpointer — so one agent is safe to reuse across requests and users that
-# share an LLM config. Rebuilding it per request re-binds tools and recompiles
-# the graph for nothing.
+# checkpointer — so one agent is safe to reuse across requests for the same
+# user and LLM config. User remains part of the key so account deletion can
+# evict every object that may retain a decrypted BYOK value.
 # ponytail: bounded LRU at 128 entries; bump if you serve many model configs.
 import hashlib
 from collections import OrderedDict
@@ -48,7 +50,9 @@ from collections import OrderedDict
 _AGENT_CACHE: "OrderedDict[tuple, object]" = OrderedDict()
 _AGENT_CACHE_MAX = 128
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+_BACKGROUND_TASK_USERS: dict[asyncio.Task[None], str] = {}
 _TITLE_UPDATE_TIMEOUT_SECONDS = 15.0
+_RUNTIME_EVICTION_TIMEOUT_SECONDS = 1.0
 
 
 def _episode_guard(db, user_id: uuid.UUID):
@@ -72,11 +76,28 @@ def _episode_guard(db, user_id: uuid.UUID):
     return guard
 
 
-def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: str, checkpointer, store=None):
+def _get_agent(
+    provider: str,
+    model: str | None,
+    base_url: str | None,
+    api_key: str,
+    checkpointer,
+    store=None,
+    *,
+    user_id: str,
+):
     from app.core.agent.agent import Agent
     from app.core.llm.provider import get_llm
 
-    key = (provider, model, base_url, hashlib.sha256(api_key.encode()).hexdigest(), id(checkpointer), id(store))
+    key = (
+        str(user_id),
+        provider,
+        model,
+        base_url,
+        hashlib.sha256(api_key.encode()).hexdigest(),
+        id(checkpointer),
+        id(store),
+    )
     agent = _AGENT_CACHE.get(key)
     if agent is None:
         llm = get_llm(provider, api_key=api_key, base_url=base_url, model=model)
@@ -89,24 +110,82 @@ def _get_agent(provider: str, model: str | None, base_url: str | None, api_key: 
     return agent
 
 
+async def evict_user_runtime(user_id: uuid.UUID | str) -> None:
+    """Drop decrypted-key agents and drain background work for one user."""
+    normalized_user_id = str(user_id)
+    for key in tuple(_AGENT_CACHE):
+        if key and key[0] == normalized_user_id:
+            _AGENT_CACHE.pop(key, None)
+
+    tasks = [
+        task
+        for task, owner_id in tuple(_BACKGROUND_TASK_USERS.items())
+        if owner_id == normalized_user_id
+    ]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        _, pending = await asyncio.wait(
+            tasks,
+            timeout=_RUNTIME_EVICTION_TIMEOUT_SECONDS,
+        )
+        if pending:
+            # A third-party provider coroutine can suppress cancellation. Do not
+            # let cache eviction itself hang forever. Its User KEY SHARE lock
+            # still prevents the following credential/account mutation from
+            # committing until the old-key task actually exits.
+            logger.warning(
+                "Timed out draining %s background task(s) during user runtime eviction.",
+                len(pending),
+            )
+
+
 async def _save_generated_title_if_present(
     request: Request,
-    agent,
     conversation_id: uuid.UUID,
     user_id: uuid.UUID,
     first_user_message: str,
+    provider: str,
+    model: str | None,
 ) -> None:
     """Best-effort title generation that never changes the chat result."""
     try:
-        title = await conversation_service.generate_title(agent, first_user_message)
         async with request.app.state.db_session() as session:
             async with session.begin():
+                access = await user_repo.get_memory_access_for_chat(
+                    session,
+                    user_id,
+                )
+                if access is None or access.account_deletion_pending:
+                    return
+                key_record = await api_key_repo.get_by_provider(
+                    session,
+                    user_id,
+                    provider,
+                )
+                if key_record is None:
+                    return
                 conv = await conversation_repo.get_owned_for_update(
                     session,
                     conversation_id,
                     user_id,
                 )
                 if conv is not None:
+                    from app.core.auth.encryption import decrypt_value
+
+                    agent = _get_agent(
+                        provider,
+                        model,
+                        key_record.base_url,
+                        decrypt_value(key_record.api_key_encrypted),
+                        getattr(request.app.state, "checkpointer", None),
+                        getattr(request.app.state, "store", None),
+                        user_id=str(user_id),
+                    )
+                    title = await conversation_service.generate_title(
+                        agent,
+                        first_user_message,
+                    )
                     await conversation_repo.update_title(
                         session,
                         conversation_id,
@@ -121,10 +200,11 @@ async def _save_generated_title_if_present(
 
 def _schedule_title_update(
     request: Request,
-    agent,
     conversation_id: uuid.UUID,
     user_id: uuid.UUID,
     first_user_message: str,
+    provider: str,
+    model: str | None,
 ) -> None:
     """Run best-effort title work without delaying a successful chat response."""
 
@@ -133,10 +213,11 @@ def _schedule_title_update(
             await asyncio.wait_for(
                 _save_generated_title_if_present(
                     request,
-                    agent,
                     conversation_id,
                     user_id,
                     first_user_message,
+                    provider,
+                    model,
                 ),
                 timeout=_TITLE_UPDATE_TIMEOUT_SECONDS,
             )
@@ -152,7 +233,13 @@ def _schedule_title_update(
     )
     # asyncio keeps only weak task references; retain this one until completion.
     _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    _BACKGROUND_TASK_USERS[task] = str(user_id)
+
+    def release(done: asyncio.Task[None]) -> None:
+        _BACKGROUND_TASKS.discard(done)
+        _BACKGROUND_TASK_USERS.pop(done, None)
+
+    task.add_done_callback(release)
 
 
 # ── Legacy endpoint (kept for OpenWebUI / third-party clients) ────────────────
@@ -211,17 +298,26 @@ async def session_chat(
 
     provider = body.provider.lower()
     # Load user's API key for this provider
-    from app.db.repositories import api_key_repo
     from app.core.auth.encryption import decrypt_value
+
+    checkpointer = getattr(request.app.state, "checkpointer", None)
+    store = getattr(request.app.state, "store", None)
+
+    # Global lock order starts with a User KEY SHARE deletion barrier. Account
+    # deletion takes FOR UPDATE, commits its tombstone, and prevents any later
+    # conversation/FK work from entering this transaction.
+    initial_access = await user_repo.get_memory_access_for_chat(db, user.id)
+    if initial_access is None:
+        raise HTTPException(status_code=401, detail="User not found.")
+    if initial_access.account_deletion_pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Account deletion is in progress.",
+        )
 
     key_record = await api_key_repo.get_by_provider(db, user.id, provider)
     if key_record is None:
         raise HTTPException(status_code=400, detail=f"No API key configured for provider '{provider}'. Add one in Settings.")
-
-    decrypted_key = decrypt_value(key_record.api_key_encrypted)
-    checkpointer = getattr(request.app.state, "checkpointer", None)
-    store = getattr(request.app.state, "store", None)
-    agent = _get_agent(provider, body.model, key_record.base_url, decrypted_key, checkpointer, store)
 
     # Create or validate conversation
     is_new_conversation = body.conversation_id is None
@@ -241,7 +337,31 @@ async def session_chat(
 
     # Save user message
     await message_repo.create(db, conversation_id=conv.id, role="user", content=body.message)
-    if detect_crisis(body.message):
+    current_crisis = detect_crisis(body.message) is not None
+    transitioned = False
+    if (
+        not conv.memory_crisis_reviewed
+        or conv.memory_crisis_review_version != CRISIS_DETECTOR_VERSION
+    ):
+        # Migration marks legacy conversations as unknown. Review their complete
+        # relational user-message history once, under the Conversation lock,
+        # before they can become eligible for Selection or Extraction.
+        history = await message_repo.list_by_conversation(db, conv.id)
+        crisis_seen = any(
+            message.role == "user" and detect_crisis(message.content) is not None
+            for message in history
+        )
+        transitioned = crisis_seen and not conv.memory_crisis_seen
+        await conversation_repo.record_memory_crisis_review(
+            db,
+            conv.id,
+            user.id,
+            crisis_seen=crisis_seen,
+        )
+        conv.memory_crisis_seen = conv.memory_crisis_seen or crisis_seen
+        conv.memory_crisis_reviewed = True
+        conv.memory_crisis_review_version = CRISIS_DETECTOR_VERSION
+    elif current_crisis:
         # Sticky relational tombstone: once a crisis turn occurs, no episode
         # from this conversation may be selected again, even if Store cleanup
         # is delayed or temporarily unavailable.
@@ -250,15 +370,15 @@ async def session_chat(
             conv.id,
             user.id,
         )
-        if transitioned:
-            await memory_job_repo.enqueue_delete_episode(
-                db,
-                user_id=user.id,
-                conversation_id=conv.id,
-                target_revision=int(conv.memory_revision),
-                consent_version=int(user.memory_consent_version),
-                data_epoch=int(user.memory_data_epoch),
-            )
+    if transitioned:
+        await memory_job_repo.enqueue_delete_episode(
+            db,
+            user_id=user.id,
+            conversation_id=conv.id,
+            target_revision=int(conv.memory_revision),
+            consent_version=initial_access.consent_version,
+            data_epoch=initial_access.data_epoch,
+        )
     await conversation_repo.touch(db, conv.id, model=body.model, provider=provider)
     await db.commit()
 
@@ -272,7 +392,9 @@ async def session_chat(
             completed = False
             missing = False
             generation_failed = False
+            credential_missing = False
             full_reply = ""
+            run_agent = None
 
             try:
                 # Hold a PostgreSQL row lock for the graph run. Conversation
@@ -281,56 +403,85 @@ async def session_chat(
                 try:
                     async with request.app.state.db_session() as session:
                         async with session.begin():
-                            locked_conv = await conversation_repo.get_owned_for_update(
+                            memory_access = await user_repo.get_memory_access_for_chat(
                                 session,
-                                conv.id,
                                 user.id,
                             )
-                            if locked_conv is None:
+                            if (
+                                memory_access is None
+                                or memory_access.account_deletion_pending
+                            ):
                                 missing = True
                             else:
-                                # Linearization point for privacy consent: read a
-                                # scalar immediately before the graph invocation,
-                                # avoiding the authenticated User object's stale
-                                # identity-map value and without locking the row.
-                                memory_access = await user_repo.get_memory_access_snapshot(
+                                run_key_record = await api_key_repo.get_by_provider(
                                     session,
                                     user.id,
+                                    provider,
                                 )
-                                if memory_access is None:
-                                    raise RuntimeError("Authenticated user no longer exists.")
-                                async for token in chat_service.stream_chat_session(
-                                    agent,
-                                    body.message,
-                                    thread_id,
-                                    user_id=str(user.id),
-                                    memory_enabled=memory_access.enabled,
-                                    memory_data_epoch=memory_access.data_epoch,
-                                    episode_guard=_episode_guard(session, user.id),
-                                    usage_sink=usage,
-                                ):
-                                    collected.append(token)
-                                    # JSON-encode so token newlines cannot break
-                                    # the SSE frame delimiter.
-                                    yield f"data: {json.dumps({'delta': token})}\n\n".encode()
-                                completed = True
-
-                                full_reply = "".join(collected)
-                                if full_reply:
-                                    await message_repo.create(
-                                        session,
-                                        conversation_id=conv.id,
-                                        role="assistant",
-                                        content=full_reply,
-                                        model_used=body.model,
-                                        provider=provider,
-                                        tokens_used=usage.get("total"),
-                                    )
-                                    await conversation_repo.touch(session, conv.id)
-                                    await conversation_repo.increment_memory_revision(
+                                if run_key_record is None:
+                                    credential_missing = True
+                                else:
+                                    locked_conv = await conversation_repo.get_owned_for_update(
                                         session,
                                         conv.id,
+                                        user.id,
                                     )
+                                    if locked_conv is None:
+                                        missing = True
+                                    else:
+                                        run_agent = _get_agent(
+                                            provider,
+                                            body.model,
+                                            run_key_record.base_url,
+                                            decrypt_value(
+                                                run_key_record.api_key_encrypted
+                                            ),
+                                            checkpointer,
+                                            store,
+                                            user_id=str(user.id),
+                                        )
+                                        tokens = chat_service.stream_chat_session(
+                                            run_agent,
+                                            body.message,
+                                            thread_id,
+                                            user_id=str(user.id),
+                                            memory_enabled=memory_access.enabled,
+                                            memory_data_epoch=memory_access.data_epoch,
+                                            episode_guard=_episode_guard(
+                                                session,
+                                                user.id,
+                                            ),
+                                            usage_sink=usage,
+                                        )
+                                        async with aclosing(tokens) as token_stream:
+                                            async for token in token_stream:
+                                                collected.append(token)
+                                                # JSON-encode so token newlines cannot break
+                                                # the SSE frame delimiter.
+                                                yield f"data: {json.dumps({'delta': token})}\n\n".encode()
+                                        full_reply = "".join(collected)
+                                        if not full_reply.strip():
+                                            raise RuntimeError(
+                                                "Model returned an empty response."
+                                            )
+                                        await message_repo.create(
+                                            session,
+                                            conversation_id=conv.id,
+                                            role="assistant",
+                                            content=full_reply,
+                                            model_used=body.model,
+                                            provider=provider,
+                                            tokens_used=usage.get("total"),
+                                        )
+                                        await conversation_repo.touch(
+                                            session,
+                                            conv.id,
+                                        )
+                                        await conversation_repo.increment_memory_revision(
+                                            session,
+                                            conv.id,
+                                        )
+                                        completed = True
                 except Exception:
                     generation_failed = True
                     logger.exception(
@@ -340,15 +491,29 @@ async def session_chat(
 
                 if missing:
                     yield f"data: {json.dumps({'error': 'Conversation no longer exists.'})}\n\n".encode()
+                    return
+                elif credential_missing:
+                    yield f"data: {json.dumps({'error': 'API key no longer available.'})}\n\n".encode()
+                    return
                 elif generation_failed:
                     yield f"data: {json.dumps({'error': 'Generation failed.'})}\n\n".encode()
-                elif completed and full_reply and is_new_conversation:
+                    return
+                if not completed:
+                    yield f"data: {json.dumps({'error': 'Generation failed.'})}\n\n".encode()
+                    return
+                if (
+                    completed
+                    and full_reply
+                    and is_new_conversation
+                    and run_agent is not None
+                ):
                     _schedule_title_update(
                         request,
-                        agent,
                         conv.id,
                         user.id,
                         body.message,
+                        provider,
+                        body.model,
                     )
 
                 # Persistence and the generation lock are complete before DONE.
@@ -373,9 +538,32 @@ async def session_chat(
 
     # Non-streaming
     usage: dict = {}
+    run_agent = None
     try:
         async with request.app.state.db_session() as session:
             async with session.begin():
+                memory_access = await user_repo.get_memory_access_for_chat(
+                    session,
+                    user.id,
+                )
+                if (
+                    memory_access is None
+                    or memory_access.account_deletion_pending
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Account or conversation no longer exists.",
+                    )
+                run_key_record = await api_key_repo.get_by_provider(
+                    session,
+                    user.id,
+                    provider,
+                )
+                if run_key_record is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="API key no longer available.",
+                    )
                 locked_conv = await conversation_repo.get_owned_for_update(
                     session,
                     conv.id,
@@ -386,16 +574,17 @@ async def session_chat(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Conversation no longer exists.",
                     )
-                # See the streaming path: this scalar SELECT is the consent
-                # snapshot for exactly this graph run.
-                memory_access = await user_repo.get_memory_access_snapshot(
-                    session,
-                    user.id,
+                run_agent = _get_agent(
+                    provider,
+                    body.model,
+                    run_key_record.base_url,
+                    decrypt_value(run_key_record.api_key_encrypted),
+                    checkpointer,
+                    store,
+                    user_id=str(user.id),
                 )
-                if memory_access is None:
-                    raise RuntimeError("Authenticated user no longer exists.")
                 reply = await chat_service.run_chat_session(
-                    agent,
+                    run_agent,
                     body.message,
                     thread_id,
                     user_id=str(user.id),
@@ -404,6 +593,8 @@ async def session_chat(
                     episode_guard=_episode_guard(session, user.id),
                     usage_sink=usage,
                 )
+                if not reply.strip():
+                    raise RuntimeError("Model returned an empty response.")
                 await message_repo.create(
                     session,
                     conversation_id=conv.id,
@@ -421,13 +612,14 @@ async def session_chat(
         logger.exception("Non-streaming chat failed for conversation %s", conv_id_str)
         raise HTTPException(status_code=500, detail="Generation failed.") from exc
 
-    if is_new_conversation:
+    if is_new_conversation and run_agent is not None:
         _schedule_title_update(
             request,
-            agent,
             conv.id,
             user.id,
             body.message,
+            provider,
+            body.model,
         )
 
     logger.info(

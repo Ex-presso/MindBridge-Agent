@@ -78,6 +78,8 @@ def test_episode_guard_requires_owner_existing_ids_and_no_crisis():
     assert "conversations.user_id" in sql
     assert "conversations.id IN" in sql
     assert "conversations.memory_crisis_seen IS false" in sql
+    assert "conversations.memory_crisis_reviewed IS true" in sql
+    assert "conversations.memory_crisis_review_version" in sql
 
 
 def test_crisis_tombstone_is_one_way_and_reports_transition():
@@ -95,7 +97,47 @@ def test_crisis_tombstone_is_one_way_and_reports_transition():
     sql = _sql(db.statements[0])
     assert "memory_crisis_seen IS false" in sql
     assert "memory_crisis_seen=" in sql
+    assert "memory_crisis_reviewed=" in sql
+    assert "memory_crisis_review_version=" in sql
     assert "RETURNING conversations.id" in sql
+
+
+def test_historical_crisis_review_is_sticky_and_marks_review_complete():
+    db = _Db(_Result(scalar=True))
+
+    crisis_seen = asyncio.run(
+        conversation_repo.record_memory_crisis_review(
+            db,
+            uuid.uuid4(),
+            uuid.uuid4(),
+            crisis_seen=True,
+        )
+    )
+
+    assert crisis_seen is True
+    sql = _sql(db.statements[0])
+    assert "memory_crisis_seen=" in sql
+    assert "memory_crisis_reviewed=" in sql
+    assert "memory_crisis_review_version=" in sql
+    assert "RETURNING conversations.memory_crisis_seen" in sql
+
+
+def test_clean_historical_review_never_clears_existing_crisis_tombstone():
+    db = _Db(_Result(scalar=True))
+
+    crisis_seen = asyncio.run(
+        conversation_repo.record_memory_crisis_review(
+            db,
+            uuid.uuid4(),
+            uuid.uuid4(),
+            crisis_seen=False,
+        )
+    )
+
+    assert crisis_seen is True
+    compiled = db.statements[0].compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "memory_crisis_seen=conversations.memory_crisis_seen" in sql
 
 
 def test_memory_revision_uses_atomic_increment_returning():

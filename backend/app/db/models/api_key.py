@@ -15,6 +15,11 @@ class UserApiKey(Base):
             "provider",
             name="uq_user_api_keys_user_id_provider",
         ),
+        UniqueConstraint(
+            "id",
+            "user_id",
+            name="uq_user_api_keys_id_user_id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

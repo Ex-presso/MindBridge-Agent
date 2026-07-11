@@ -97,8 +97,21 @@ MEMORY_JOB_COLUMNS = frozenset(
 )
 
 WRITE_SAFETY_COLUMNS: dict[str, frozenset[str]] = {
-    "users": frozenset({"memory_consent_version", "memory_data_epoch"}),
-    "conversations": frozenset({"memory_revision", "memory_crisis_seen"}),
+    "users": frozenset(
+        {
+            "memory_consent_version",
+            "memory_data_epoch",
+            "account_deletion_pending",
+        }
+    ),
+    "conversations": frozenset(
+        {
+            "memory_revision",
+            "memory_crisis_seen",
+            "memory_crisis_reviewed",
+            "memory_crisis_review_version",
+        }
+    ),
 }
 
 APPLICATION_TABLES = frozenset(
@@ -180,26 +193,12 @@ def decide_schema_upgrade(
         or bool(conversation_columns & WRITE_SAFETY_COLUMNS["conversations"])
     )
     if has_write_safety_marker:
-        if "user_api_keys" not in present_application_tables:
-            raise LegacySchemaError(
-                "Cannot adopt incompatible unversioned write-safety schema: "
-                "user_api_keys table is missing. Migrate the database manually."
-            )
-        required_write_safety = {
-            "users": WRITE_SAFETY_COLUMNS["users"] | {"memory_enabled"},
-            "conversations": WRITE_SAFETY_COLUMNS["conversations"],
-            "memory_jobs": MEMORY_JOB_COLUMNS,
-        }
-        for table_name, required_columns in required_write_safety.items():
-            actual_columns = set(columns_by_table.get(table_name, ()))
-            missing_columns = sorted(required_columns - actual_columns)
-            if missing_columns:
-                raise LegacySchemaError(
-                    "Cannot adopt incompatible unversioned write-safety schema: "
-                    f"table {table_name!r} is missing columns {missing_columns}. "
-                    "Migrate the database manually."
-                )
-        revision = "004"
+        raise LegacySchemaError(
+            "Cannot automatically adopt an unversioned write-safety schema by "
+            "column names alone. Verify types, nullability, checks, unique "
+            "constraints, foreign keys, and indexes against Alembic head, then "
+            "stamp it explicitly or migrate the database manually."
+        )
     else:
         revision = "002" if "memory_enabled" in users_columns else "001"
     return SchemaUpgradePlan(

@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -41,6 +42,30 @@ class MemoryJob(Base):
             name="ck_memory_jobs_status",
         ),
         UniqueConstraint("dedupe_key", name="uq_memory_jobs_dedupe_key"),
+        ForeignKeyConstraint(
+            ["conversation_id", "user_id"],
+            ["conversations.id", "conversations.user_id"],
+            name="fk_memory_jobs_conversation_owner",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["source_user_message_id", "conversation_id"],
+            ["messages.id", "messages.conversation_id"],
+            name="fk_memory_jobs_user_message_conversation",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["source_assistant_message_id", "conversation_id"],
+            ["messages.id", "messages.conversation_id"],
+            name="fk_memory_jobs_assistant_message_conversation",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["api_key_id", "user_id"],
+            ["user_api_keys.id", "user_api_keys.user_id"],
+            name="fk_memory_jobs_api_key_owner",
+            ondelete="CASCADE",
+        ),
         Index("ix_memory_jobs_status_available_at", "status", "available_at"),
         Index(
             "ix_memory_jobs_conversation_revision",
@@ -48,6 +73,21 @@ class MemoryJob(Base):
             "target_revision",
         ),
         Index("ix_memory_jobs_user_status", "user_id", "status"),
+        Index(
+            "ix_memory_jobs_user_message_conversation",
+            "source_user_message_id",
+            "conversation_id",
+        ),
+        Index(
+            "ix_memory_jobs_assistant_message_conversation",
+            "source_assistant_message_id",
+            "conversation_id",
+        ),
+        Index(
+            "ix_memory_jobs_api_key_user",
+            "api_key_id",
+            "user_id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -57,22 +97,18 @@ class MemoryJob(Base):
         nullable=False,
     )
     conversation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
     )
     target_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
     consent_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
     data_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_user_message_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("messages.id", ondelete="SET NULL"),
         nullable=True,
     )
     source_assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("messages.id", ondelete="SET NULL"),
         nullable=True,
     )
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("user_api_keys.id", ondelete="SET NULL"),
         nullable=True,
     )
     provider: Mapped[str | None] = mapped_column(String(50), nullable=True)

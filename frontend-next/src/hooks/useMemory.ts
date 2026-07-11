@@ -67,5 +67,6 @@ export function useMemory() {
     memoryError: error,
     setMemoryEnabled,
     clearMemory,
+    refreshMemory: () => mutate(),
   };
 }

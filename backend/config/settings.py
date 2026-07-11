@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 from pydantic import Field, SecretStr
+from typing import Literal
 
 class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
@@ -54,6 +55,10 @@ class Settings(BaseSettings):
 
     # PostgreSQL / pgvector
     DATABASE_URL: str = "postgresql+psycopg://mindbridge:mindbridge_dev@localhost:5432/mindbridge"
+    # Credential/account deletion barriers rely on a fresh statement snapshot
+    # after a blocked row lock is released. Do not make this configurable to a
+    # snapshot isolation level without adding a credential epoch protocol.
+    DATABASE_ISOLATION_LEVEL: Literal["READ COMMITTED"] = "READ COMMITTED"
     PGVECTOR_COLLECTION: str = "mental_health_docs"
 
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]  # => backend/

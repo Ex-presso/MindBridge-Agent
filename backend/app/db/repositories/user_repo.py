@@ -13,6 +13,7 @@ class MemoryAccessSnapshot:
     enabled: bool
     consent_version: int
     data_epoch: int
+    account_deletion_pending: bool = False
 
 
 async def get_by_email(db: AsyncSession, email: str) -> User | None:
@@ -25,11 +26,15 @@ async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     return result.scalar_one_or_none()
 
 
-async def get_for_update(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+async def lock_for_account_deletion(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> bool:
+    """Take a strong User lock that blocks new child-FK KEY SHARE locks."""
     result = await db.execute(
-        select(User).where(User.id == user_id).with_for_update()
+        select(User.id).where(User.id == user_id).with_for_update()
     )
-    return result.scalar_one_or_none()
+    return result.scalar_one_or_none() is not None
 
 
 async def get_memory_enabled(db: AsyncSession, user_id: uuid.UUID) -> bool:
@@ -50,6 +55,7 @@ async def get_memory_access_snapshot(
             User.memory_enabled,
             User.memory_consent_version,
             User.memory_data_epoch,
+            User.account_deletion_pending,
         ).where(User.id == user_id)
     )
     row = result.one_or_none()
@@ -59,6 +65,59 @@ async def get_memory_access_snapshot(
         enabled=bool(row[0]),
         consent_version=int(row[1]),
         data_epoch=int(row[2]),
+        account_deletion_pending=bool(row[3]),
+    )
+
+
+async def get_memory_access_for_chat(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> MemoryAccessSnapshot | None:
+    """Lock User in KEY SHARE before any Conversation lock or FK insert."""
+    result = await db.execute(
+        select(
+            User.memory_enabled,
+            User.memory_consent_version,
+            User.memory_data_epoch,
+            User.account_deletion_pending,
+        )
+        .where(User.id == user_id)
+        .with_for_update(read=True, key_share=True)
+    )
+    row = result.one_or_none()
+    if row is None:
+        return None
+    return MemoryAccessSnapshot(
+        enabled=bool(row[0]),
+        consent_version=int(row[1]),
+        data_epoch=int(row[2]),
+        account_deletion_pending=bool(row[3]),
+    )
+
+
+async def get_memory_access_for_update(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> MemoryAccessSnapshot | None:
+    """Strong-lock User before a runtime credential mutation."""
+    result = await db.execute(
+        select(
+            User.memory_enabled,
+            User.memory_consent_version,
+            User.memory_data_epoch,
+            User.account_deletion_pending,
+        )
+        .where(User.id == user_id)
+        .with_for_update()
+    )
+    row = result.one_or_none()
+    if row is None:
+        return None
+    return MemoryAccessSnapshot(
+        enabled=bool(row[0]),
+        consent_version=int(row[1]),
+        data_epoch=int(row[2]),
+        account_deletion_pending=bool(row[3]),
     )
 
 

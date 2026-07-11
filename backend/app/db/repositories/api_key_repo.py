@@ -1,6 +1,8 @@
 import uuid
+from datetime import datetime, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.api_key import UserApiKey
@@ -30,27 +32,31 @@ async def upsert(
     model_id: str | None = None,
     display_name: str | None = None,
 ) -> UserApiKey:
-    existing = await get_by_provider(db, user_id, provider)
-    if existing:
-        existing.api_key_encrypted = api_key_encrypted
-        existing.base_url = base_url
-        existing.model_id = model_id
-        existing.display_name = display_name
-        await db.flush()
-        await db.refresh(existing)
-        return existing
-    record = UserApiKey(
-        user_id=user_id,
-        provider=provider,
-        api_key_encrypted=api_key_encrypted,
-        base_url=base_url,
-        model_id=model_id,
-        display_name=display_name,
+    statement = (
+        insert(UserApiKey)
+        .values(
+            user_id=user_id,
+            provider=provider,
+            api_key_encrypted=api_key_encrypted,
+            base_url=base_url,
+            model_id=model_id,
+            display_name=display_name,
+        )
+        .on_conflict_do_update(
+            index_elements=[UserApiKey.user_id, UserApiKey.provider],
+            set_={
+                "api_key_encrypted": api_key_encrypted,
+                "base_url": base_url,
+                "model_id": model_id,
+                "display_name": display_name,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+        .returning(UserApiKey)
+        .execution_options(populate_existing=True)
     )
-    db.add(record)
-    await db.flush()
-    await db.refresh(record)
-    return record
+    result = await db.execute(statement)
+    return result.scalar_one()
 
 
 async def delete_by_provider(db: AsyncSession, user_id: uuid.UUID, provider: str) -> bool:

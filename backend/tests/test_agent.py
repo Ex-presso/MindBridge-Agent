@@ -2,7 +2,7 @@
 import asyncio
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from app.core.agent.agent import Agent
 
@@ -65,3 +65,35 @@ def test_block_content_normalized_not_repred():
     agent = Agent(_BlockContentLLM(), checkpointer=None)
     out = asyncio.run(agent.acomplete([HumanMessage(content="hi")]))
     assert out == "Hello there"
+
+
+def test_agent_closes_langgraph_event_stream_on_consumer_disconnect():
+    async def scenario():
+        closed = asyncio.Event()
+
+        class StreamingApp:
+            async def astream_events(self, *args, **kwargs):
+                try:
+                    yield {
+                        "event": "on_chat_model_stream",
+                        "tags": [],
+                        "data": {"chunk": AIMessageChunk(content="token")},
+                    }
+                    await asyncio.Event().wait()
+                finally:
+                    closed.set()
+
+        agent = object.__new__(Agent)
+        agent.app = StreamingApp()
+        stream = agent.astream_tokens(
+            HumanMessage(content="hello"),
+            thread_id="thread-1",
+        )
+
+        assert await anext(stream) == "token"
+        assert not closed.is_set()
+        await stream.aclose()
+
+        assert closed.is_set()
+
+    asyncio.run(scenario())

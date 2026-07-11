@@ -32,6 +32,12 @@ class User(Base):
         server_default="0",
         nullable=False,
     )
+    account_deletion_pending: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

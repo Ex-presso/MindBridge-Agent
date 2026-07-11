@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 import uuid
 
 import pytest
@@ -42,6 +43,8 @@ class _Db:
                 user.memory_consent_version = 0
             if not hasattr(user, "memory_data_epoch"):
                 user.memory_data_epoch = 0
+            if not hasattr(user, "account_deletion_pending"):
+                user.account_deletion_pending = False
         self.events = events if events is not None else []
         self.execute_count = 0
         self.commit_count = 0
@@ -67,11 +70,16 @@ class _Db:
         }
         if "memory_data_epoch" in updated_columns:
             self.user.memory_data_epoch += 1
+        if "account_deletion_pending" in updated_columns:
+            self.user.account_deletion_pending = compiled.params[
+                "account_deletion_pending"
+            ]
         return _Result(
             (
                 self.user.memory_enabled,
                 self.user.memory_consent_version,
                 self.user.memory_data_epoch,
+                self.user.account_deletion_pending,
             ),
             rowcount=1,
         )
@@ -178,7 +186,60 @@ def test_set_memory_consent_uses_forced_update_returning():
     assert "UPDATE users SET memory_enabled" in sql
     assert "users.memory_consent_version" in sql
     assert "users.memory_data_epoch" in sql
+    assert "users.account_deletion_pending IS false" in sql
     assert user.memory_consent_version == 1
+
+
+def test_begin_account_deletion_strong_locks_before_tombstone_commit(
+    monkeypatch,
+):
+    user_id = uuid.uuid4()
+    events: list[str] = []
+    user = SimpleNamespace(id=user_id, memory_enabled=True)
+    db = _Db(user, events)
+
+    async def lock_user(_db, locked_user_id):
+        assert _db is db
+        assert locked_user_id == user_id
+        events.append("lock_user")
+        return True
+
+    monkeypatch.setattr(
+        memory_service.user_repo,
+        "lock_for_account_deletion",
+        lock_user,
+    )
+
+    state = asyncio.run(memory_service.begin_account_deletion(db, user_id))
+
+    assert state == memory_service.MemoryGateState(
+        enabled=False,
+        consent_version=1,
+        data_epoch=1,
+        account_deletion_pending=True,
+    )
+    assert events == [
+        "lock_user",
+        "consent_write",
+        "jobs_cancel",
+        "commit",
+    ]
+
+
+def test_begin_account_deletion_missing_user_writes_nothing(monkeypatch):
+    user_id = uuid.uuid4()
+    db = _Db(None)
+    monkeypatch.setattr(
+        memory_service.user_repo,
+        "lock_for_account_deletion",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(memory_service.MemoryUserNotFoundError):
+        asyncio.run(memory_service.begin_account_deletion(db, user_id))
+
+    assert db.execute_count == 0
+    assert db.commit_count == 0
 
 
 def test_clear_memory_disables_before_store_access_and_batch_deletes():

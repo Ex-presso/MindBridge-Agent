@@ -1,5 +1,6 @@
 """Chat service — orchestrates agent invocation for both legacy and session-aware endpoints."""
 from collections.abc import AsyncGenerator, Sequence
+from contextlib import aclosing
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -62,7 +63,7 @@ async def stream_chat_session(
     usage_sink: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Real token streaming for the session-aware endpoint."""
-    async for token in agent.astream_tokens(
+    tokens = agent.astream_tokens(
         HumanMessage(content=new_message),
         thread_id=thread_id,
         usage_sink=usage_sink,
@@ -70,5 +71,7 @@ async def stream_chat_session(
         memory_enabled=memory_enabled,
         memory_data_epoch=memory_data_epoch,
         episode_guard=episode_guard,
-    ):
-        yield token
+    )
+    async with aclosing(tokens) as token_stream:
+        async for token in token_stream:
+            yield token

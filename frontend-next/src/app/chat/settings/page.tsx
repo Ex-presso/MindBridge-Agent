@@ -180,6 +180,7 @@ export default function SettingsPage() {
     memoryError,
     setMemoryEnabled,
     clearMemory,
+    refreshMemory,
   } = useMemory();
   const [memoryBusy, setMemoryBusy] = useState<"toggle" | "clear" | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
@@ -251,8 +252,9 @@ export default function SettingsPage() {
       await deleteAccount(accountPassword);
       toast.success("Account deleted");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete account");
       setAccountBusy(false);
+      await refreshMemory().catch(() => undefined);
+      toast.error(err instanceof Error ? err.message : "Failed to delete account");
     }
   };
 

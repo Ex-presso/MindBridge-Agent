@@ -38,6 +38,7 @@ def _has_user_provider_uniqueness(inspector: sa.Inspector) -> bool:
     return any(
         index.get("unique")
         and set(index.get("column_names") or ()) == expected_columns
+        and not (index.get("dialect_options") or {}).get("postgresql_where")
         for index in inspector.get_indexes("user_api_keys")
     )
 
@@ -77,6 +78,41 @@ def _ensure_api_key_uniqueness(bind: sa.Connection) -> None:
         "user_api_keys",
         ["user_id", "provider"],
     )
+
+
+def _assert_safe_downgrade(bind: sa.Connection) -> None:
+    """Refuse to erase live invalidation, crisis, revision, or outbox state."""
+    # Prevent a clear/job enqueue from committing after this preflight and
+    # before the destructive DDL. The order mirrors runtime parent→child locks.
+    bind.execute(
+        sa.text(
+            "LOCK TABLE users, conversations, user_api_keys, memory_jobs "
+            "IN EXCLUSIVE MODE"
+        )
+    )
+    unsafe_state = bind.execute(
+        sa.text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM users
+                WHERE memory_consent_version <> 0 OR memory_data_epoch <> 0
+            ) OR EXISTS (
+                SELECT 1
+                FROM conversations
+                WHERE memory_revision <> 0 OR memory_crisis_seen IS TRUE
+            ) OR EXISTS (
+                SELECT 1 FROM memory_jobs
+            )
+            """
+        )
+    ).scalar_one()
+    if unsafe_state:
+        raise RuntimeError(
+            "Cannot downgrade memory write safety while non-default memory "
+            "versions, crisis tombstones, revisions, or jobs exist. Clear or "
+            "migrate that state explicitly before retrying."
+        )
 
 
 def upgrade() -> None:
@@ -219,6 +255,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    _assert_safe_downgrade(bind)
+
     op.drop_index("ix_memory_jobs_user_status", table_name="memory_jobs")
     op.drop_index(
         "ix_memory_jobs_conversation_revision",
@@ -231,15 +270,6 @@ def downgrade() -> None:
     op.drop_column("users", "memory_data_epoch")
     op.drop_column("users", "memory_consent_version")
 
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
-    constraint_names = {
-        constraint["name"]
-        for constraint in inspector.get_unique_constraints("user_api_keys")
-    }
-    if API_KEY_UNIQUE_CONSTRAINT in constraint_names:
-        op.drop_constraint(
-            API_KEY_UNIQUE_CONSTRAINT,
-            "user_api_keys",
-            type_="unique",
-        )
+    # Intentionally retain user/provider uniqueness. Revision 004 may have
+    # adopted an equivalent pre-existing constraint and cannot prove ownership
+    # during downgrade; deleting it could weaken a legacy schema.

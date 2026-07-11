@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
@@ -808,25 +809,30 @@ class Agent:
         )
         crisis = detect_crisis(self._normalize_content(new_message.content))
         try:
-            async for event in self.app.astream_events(
+            events = self.app.astream_events(
                 {"messages": [new_message]},
                 config=config,
                 context=context,
                 version="v2",
-            ):
-                # Skip internal LLM calls (e.g. summarization) so their tokens don't
-                # leak into the user-facing stream or the usage count.
-                if "internal" in (event.get("tags") or []):
-                    continue
-                etype = event["event"]
-                if etype == "on_chat_model_stream":
-                    # Normalize: Anthropic streams content as a list of blocks;
-                    # str() would emit their Python repr.
-                    text = self._normalize_content(event["data"]["chunk"].content)
-                    if text:
-                        yield text
-                elif etype == "on_chat_model_end":
-                    self._accumulate_usage(usage_sink, event["data"].get("output"))
+            )
+            async with aclosing(events) as event_stream:
+                async for event in event_stream:
+                    # Skip internal LLM calls (e.g. summarization) so their tokens don't
+                    # leak into the user-facing stream or the usage count.
+                    if "internal" in (event.get("tags") or []):
+                        continue
+                    etype = event["event"]
+                    if etype == "on_chat_model_stream":
+                        # Normalize: Anthropic streams content as a list of blocks;
+                        # str() would emit their Python repr.
+                        text = self._normalize_content(event["data"]["chunk"].content)
+                        if text:
+                            yield text
+                    elif etype == "on_chat_model_end":
+                        self._accumulate_usage(
+                            usage_sink,
+                            event["data"].get("output"),
+                        )
         except Exception:
             if not crisis:
                 raise
