@@ -21,3 +21,22 @@ async def list_by_conversation(db: AsyncSession, conv_id: uuid.UUID) -> list[Mes
         .order_by(Message.created_at.asc())
     )
     return list(result.scalars().all())
+
+
+async def list_by_ids_for_conversation(
+    db: AsyncSession,
+    conv_id: uuid.UUID,
+    message_ids: tuple[uuid.UUID, ...],
+) -> list[Message]:
+    """Reload exact relational evidence inside one conversation boundary."""
+    if not message_ids:
+        return []
+    result = await db.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conv_id,
+            Message.id.in_(message_ids),
+        )
+        .order_by(Message.created_at.asc())
+    )
+    return list(result.scalars().all())

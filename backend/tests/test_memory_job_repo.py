@@ -1,6 +1,7 @@
 """Durable memory outbox repository contracts."""
 
 import asyncio
+from datetime import datetime, timezone
 import uuid
 
 from sqlalchemy.dialects import postgresql
@@ -28,6 +29,24 @@ class _Db:
 
     async def flush(self):
         self.flush_count += 1
+
+
+class _ClaimResult:
+    def __init__(self, job):
+        self.job = job
+
+    def scalar_one_or_none(self):
+        return self.job
+
+
+class _ClaimDb(_Db):
+    def __init__(self, job):
+        super().__init__()
+        self.job = job
+
+    async def execute(self, statement):
+        self.statement = statement
+        return _ClaimResult(self.job)
 
 
 def test_memory_job_ownership_foreign_keys_have_matching_child_indexes():
@@ -117,3 +136,53 @@ def test_crisis_delete_job_has_stable_dedupe_key_and_high_priority():
     assert job.dedupe_key == (
         f"delete_episode:crisis:{user_id}:{conversation_id}"
     )
+
+    # Privacy deletion keeps retrying after the normal extraction limit.
+    job.status = "processing"
+    job.attempts = 3
+    job.lease_until = datetime.now(timezone.utc)
+    retry_db = _ClaimDb(job)
+    asyncio.run(
+        memory_job_repo.retry_claim(
+            retry_db,
+            job_id=job.id,
+            lease_until=job.lease_until,
+            max_attempts=3,
+            error_code="store_delete_failed",
+        )
+    )
+    assert job.status == "retry"
+    assert job.attempts == 4
+
+
+def test_claim_next_uses_skip_locked_and_sets_a_bounded_lease():
+    job = MemoryJob(
+        operation="extract_episode",
+        user_id=uuid.uuid4(),
+        conversation_id=uuid.uuid4(),
+        target_revision=1,
+        consent_version=1,
+        data_epoch=0,
+        status="pending",
+        attempts=0,
+        priority=100,
+        available_at=datetime.now(timezone.utc),
+        dedupe_key=f"test:{uuid.uuid4()}",
+    )
+    db = _ClaimDb(job)
+
+    claimed = asyncio.run(
+        memory_job_repo.claim_next(
+            db,
+            lease_seconds=90,
+            max_attempts=3,
+        )
+    )
+
+    assert claimed is job
+    assert job.status == "processing"
+    assert job.attempts == 0
+    assert job.lease_until is not None
+    sql = str(db.statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE SKIP LOCKED" in sql
+    assert "ORDER BY memory_jobs.priority ASC" in sql

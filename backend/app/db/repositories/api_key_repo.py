@@ -15,6 +15,20 @@ async def get_by_provider(db: AsyncSession, user_id: uuid.UUID, provider: str) -
     return result.scalar_one_or_none()
 
 
+async def get_owned_by_id(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    api_key_id: uuid.UUID,
+) -> UserApiKey | None:
+    result = await db.execute(
+        select(UserApiKey).where(
+            UserApiKey.id == api_key_id,
+            UserApiKey.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 async def list_by_user(db: AsyncSession, user_id: uuid.UUID) -> list[UserApiKey]:
     result = await db.execute(
         select(UserApiKey).where(UserApiKey.user_id == user_id).order_by(UserApiKey.provider)

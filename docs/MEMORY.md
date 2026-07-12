@@ -16,12 +16,13 @@ The application currently has two working memory mechanisms:
   the working context exceeds its budget.
 
 An `AsyncPostgresStore` is initialized alongside the checkpointer and passed to
-the compiled graph. The privacy API can inspect and clear it, and conversation
-deletion removes the matching episode key. The graph now performs read-only,
-user-scoped Selection before normal chat. There is still no automatic or
-user-facing long-term writer. The durable write-safety outbox and invalidation
-versions are in place. A pure structured episode Extraction core is implemented,
-but no production request enqueues it and it cannot write to Store.
+the compiled graph. The privacy API can inspect and clear it, conversation
+deletion removes the matching episode key, and the graph performs user-scoped
+Selection before normal chat. Successful opted-in turns now enqueue grounded
+Episode Extraction in the assistant persistence transaction. A leased worker
+reloads relational evidence, applies the privacy gates, and writes an idempotent
+conversation Episode to Store. There is still no public direct-memory write API
+or automatic semantic-fact writer.
 
 The privacy foundation is implemented:
 
@@ -104,11 +105,9 @@ the normalized user ID is the isolation boundary, and the final component is
 the memory category. Inspection and deletion validate returned namespaces
 before exposing or mutating them.
 
-## Implemented write-safety foundation
+## Implemented production writer
 
-The writer is not enabled yet, but its concurrency and deletion primitives are
-implemented before any production transcript can be sent automatically to an
-extractor:
+The Episode writer uses the following production gates and deletion primitives:
 
 - `memory_consent_version` advances only when the enabled state really changes.
   A job captures it so disable then re-enable cannot authorize an older job.
@@ -124,8 +123,8 @@ extractor:
 - `conversation.memory_crisis_seen` is sticky. The first deterministic crisis
   match commits the tombstone with the user message and enqueues a high-priority
   `delete_episode` outbox job. The relational Selection guard blocks that
-  conversation immediately; physical Store deletion will be performed by the
-  worker delivery unit.
+  conversation immediately; the high-priority worker job physically deletes
+  the Store value and retries with capped backoff until it succeeds.
 - Existing conversations are migrated with `memory_crisis_reviewed=false` and
   `memory_crisis_review_version=0`, so they remain ineligible. On their next
   user turn, the complete relational user history is scanned by the current
@@ -138,6 +137,26 @@ extractor:
   account deletion cancel unfinished jobs transactionally. Composite foreign
   keys prove that its Conversation, source messages, API key, and User belong
   together; matching child indexes keep cascades bounded.
+- A successful assistant row, the new `memory_revision`, and its
+  `extract_episode` job commit atomically. Empty, failed, canceled, disabled, or
+  crisis turns never enqueue Extraction. The job stores IDs and version/config
+  snapshots, never plaintext credentials or transcript bodies.
+- FastAPI lifespan runs one lightweight asyncio worker. Jobs are leased with
+  `FOR UPDATE SKIP LOCKED`; `lease_until` is the ownership token, while
+  `attempts` counts actual processing failures rather than queue or lock wait.
+  Extraction failures stop after three attempts. Privacy `delete_episode` jobs
+  remain higher priority and retry indefinitely with a capped delay, even when
+  the global memory switch is off.
+- The worker locks `User FOR SHARE → Conversation FOR UPDATE → MemoryJob FOR
+  UPDATE`, then rechecks global/user consent, consent version, data epoch,
+  account state, exact conversation revision, crisis review, lease ownership,
+  and the current owned BYOK row. Provider/base-URL changes supersede the job;
+  the current credential is decrypted only after all gates pass.
+- Store `aget`, `aput`, and `adelete` calls have a 15-second boundary. Episode
+  writes use conversation ID as the key. The same revision is an idempotent
+  success, a newer revision is never overwritten, and a higher data epoch fails
+  closed. A Store success followed by database commit failure converges on the
+  next lease through the same-revision read.
 - `DELETE /api/v1/auth/me` requires password confirmation. It first commits the
   disabled/version tombstone with `account_deletion_pending=true`, then locks
   User → Conversations, clears the whole Store prefix and every known
@@ -181,30 +200,64 @@ primitive. Memory behavior remains application-controlled:
 1. **Selection** reads user-confirmed context and relevant prior episodes before
    a normal response. The read-only stage is implemented.
 2. **Extraction** derives narrowly scoped, attributable memory candidates after
-   completed turns. Its pure structured-draft and deterministic filtering core
-   is implemented, but no request currently enqueues an extraction job and no
-   worker writes a draft to Store.
+   completed turns. The structured-draft core, transactional enqueue, leased
+   execution, relational revalidation, and Episode Store write are implemented.
 3. **Consolidation** resolves duplicates, contradictions, and stale entries at a
    controlled cadence.
 
 These operations are harness-triggered rather than left to optional model tool
 calls. Their LLM-generated outputs are still probabilistic and must be validated
-against strict schemas. A constrained `save_memory` tool may be added only after
-the automatic path and privacy controls are stable.
+against strict schemas. The constrained `save_memory` tool remains the one
+agentic hook in the C′ target, but is deferred until the automatic path and
+privacy controls are stable.
+
+### C′ alignment
+
+The implementation still follows the original **C′ (Claude Code-aligned)**
+decision. “Deterministic” describes who decides whether a memory operation runs;
+it does not pretend that an internal LLM draft is deterministic:
+
+| Subsystem | C′ trigger/authority | Current status |
+|---|---|---|
+| Selection | Harness runs it before every eligible chat; recall is not an optional model tool | Complete |
+| Extraction | Harness runs it after every eligible completed turn; the LLM may only propose a schema-bound draft | Episode path complete; semantic path planned |
+| Consolidation | Harness will run it at an explicit threshold/cadence | Planned after frozen evaluation |
+| `save_memory` | The only agentic memory action in the complete C′ target | Deliberately deferred |
+
+The original sketch placed `extract_memory` at the end of the LangGraph. The
+production implementation moves that same deterministic trigger to the
+assistant SQL transaction and durable outbox. This is an implementation
+hardening, not an architectural drift: the model still cannot choose whether
+Selection, Extraction, evidence validation, privacy filtering, leasing, or the
+Store write happens. Moving the side effect out of the graph adds retries,
+idempotency, deletion ordering, and crash recovery without putting memory policy
+under model control.
+
+The current milestone is therefore the **C′ episodic production slice**, not the
+complete three-layer endpoint. Semantic Extraction, Consolidation, and the
+single constrained `save_memory` hook remain open. Omitting that hook permanently
+would be a deliberate departure from the original full C′ definition and must
+be documented as such rather than silently relabeled.
+
+The crisis policy is intentionally stricter than the early sketch: a detected
+crisis does not merely skip one turn. It sets a sticky conversation tombstone,
+excludes the whole Episode, and schedules physical deletion. This is a safety
+hardening within the deterministic harness, not a shift of authority to the
+model.
 
 The implemented Extraction core accepts supplied source-message records plus an
 optional prior `EpisodeDraft`, but places only **user-role** records in the model
 prompt; supplied assistant records are ignored and cannot become evidence. The
-future worker must reload every current and historical citation from the
-relational `(user_id, conversation_id)` scope before calling this pure core. The
+worker reloads every current and historical citation from the relational
+`(user_id, conversation_id)` scope before calling this pure core. The
 core exact-matches those supplied records and never consumes assistant replies,
 the LangGraph compaction summary, or the current Selection buffer. Each claim
 carries a canonical `evidence_message_id` and an exact `evidence_quote`; the
 claim itself must occur inside that quote, and every topic must be an exact span
 of a validated claim. A model cannot silently mutate a previously cited claim.
 `summary` is a deterministic join of the validated claims rather than another
-model-authored field. The future Store value must persist those immutable claims
-together with `target_revision`, so the worker can reject stale overwrites.
+model-authored field. Store values persist those immutable claims together with
+`target_revision`, so stale overwrites are rejected.
 
 OpenAI, Anthropic, Gemini, and compatible BYOK endpoints are wrapped with strict
 structured output, a 2,048-token cap, a 30-second invocation timeout, and a
@@ -214,15 +267,17 @@ responses, transcript bodies, parsing exception text, and provider payloads are
 never logged or returned. Endpoint schema capability is checked at invocation
 time. Parsing/filtering failures return bounded content-safe codes; unsupported
 schema, timeout, and invocation failures raise sanitized typed exceptions for
-the future worker's retry classifier.
+the worker's retry classifier.
 
 Before any provider call, the whole draft is rejected if a supplied or prior
 source trips the bilingual deterministic crisis detector. NFKC-normalized
 diagnosis and persisted-instruction filters run after parsing; common text
 whitespace is JSON-escaped while NUL, format, and other unsafe control
-characters are rejected. Filtered or invalid drafts are not persisted. Model
-invocation and Store writing remain separate future steps, so this core does not
-yet send production transcripts or create durable memory.
+characters are rejected. Filtered or invalid drafts are not persisted. Prior
+quotes are checked against full relational messages, projected into a bounded
+prompt, then every returned citation is checked against the full message again.
+The worker always includes the current turn and caps source input at 40 records
+and 12,000 characters.
 
 An LM Studio probe on 2026-07-11 confirmed that `/v1/models` and the
 OpenAI-compatible chat endpoint are reachable. The loaded
@@ -235,11 +290,8 @@ the schema in standard structured content.
 
 ## Privacy invariants
 
-Mental-health conversations are sensitive. The implemented foundation enforces
-consent, inspection, user-scoped deletion, and conversation cleanup before any
-long-term writer exists. Automatic Extraction and Store writing must not ship
-until the remaining write-specific invariants below are also enforced and
-tested:
+Mental-health conversations are sensitive. The implemented writer enforces the
+following invariants before a transcript reaches Extraction or Store:
 
 - Memory is explicitly enabled per user and can be disabled immediately.
 - Users can inspect and delete every durable memory stored about them.
@@ -296,7 +348,7 @@ frame, but it cannot roll the checkpoint back atomically. Before production
 hardening, add an idempotent outbox/reconciliation path (or choose one store as
 the sole source of truth) and fault-injection tests for this boundary.
 
-## Planned data model
+## Stored data model
 
 Semantic memory uses small, attributable items rather than a single unversioned
 profile document. Each item records its kind, normalized content, source thread
@@ -316,8 +368,8 @@ are conversation IDs and values contain at least
 `{conversation_id, claims=[{claim, evidence_message_id, evidence_quote}],
 summary, topics, target_revision, status="active", crisis=false,
 data_epoch=...}`; `summary` must equal the deterministic join of `claims`, and its
-`summary` field is vector-indexed. There is intentionally no public write API
-until Extraction, crisis filtering, attribution, and idempotency are complete.
+`summary` field is vector-indexed. The automatic Episode writer produces this
+shape; there is intentionally no public direct write API.
 Legacy manual episode values containing only `summary/topics` remain visible to
 the privacy inspection and deletion APIs, but Selection now rejects them
 fail-closed. They must be re-derived with grounded `claims` and a
@@ -332,35 +384,54 @@ fail-closed. They must be re-derived with grounded `claims` and a
    and retry-safe account cascade.
 5. **Complete:** add the pure structured episode draft, user-evidence grounding,
    deterministic crisis/diagnosis/instruction filters, and sanitized failures.
-6. **Next:** enqueue extraction jobs for completed turns and add the leased
-   worker, idempotent vector upsert, and retry policy.
-7. Add conflict-aware Consolidation.
-8. Add a constrained explicit-memory tool if evaluation justifies it.
-9. Run a frozen multi-session evaluation covering recall, contradiction updates,
-   irrelevant-memory rejection, user isolation, deletion, crisis filtering, and
-   persistent prompt-injection attempts.
+6. **Complete:** enqueue completed turns and add the leased worker, bounded
+   retries, relational source reload, and idempotent Episode upsert/deletion.
+7. **Next:** run three production smoke paths with OrbStack and a local model
+   that returns structured output in standard `message.content`.
+8. Freeze a 12–20 case multi-session memory on/off evaluation covering recall,
+   evidence accuracy, irrelevant-memory rejection, user isolation, deletion,
+   crisis filtering, prompt injection, latency, and token cost.
+9. Use those results to implement only the minimum explicit semantic facts and
+   conflict-aware Consolidation needed for a complete three-layer claim.
+10. Implement the constrained C′ `save_memory` hook last; evaluation determines
+    its narrow scope and priority, not whether an unimplemented system may be
+    described as the complete C′ target.
 
-## Human review handoff (2026-07-11)
+## Next delivery plan
 
-The review boundary is intentionally limited to the safety foundation and the
-pure Extraction core. Review commit `9e971d4` together with the immediately
-following Extraction/documentation commit. In particular, verify the global
-User → Conversation lock order, migration `004`/`005` downgrade guards, stream
-closure and terminal-frame semantics, evidence exact-matching, and the
-crisis/diagnosis/persistent-instruction filters.
+1. **Production smoke:** verify `chat → outbox → worker → Store → later recall`,
+   consent-off no-write behavior, and crisis-triggered physical deletion. This
+   is intentionally three scenarios rather than another broad unit-test matrix.
+2. **Frozen memory evaluation:** compare memory off/on with stable fixtures and
+   publish recall, rejection, evidence, isolation/deletion, latency, and token
+   results in the repository.
+3. **Minimal semantic layer:** store only explicit preferences, goals, helpful
+   strategies, and important people with relational evidence. Never infer a
+   diagnosis. Deduplicate equivalent facts and supersede conflicts.
+4. **Deterministic Consolidation:** trigger by an application threshold or
+   cadence, not a model tool decision. Keep the scope limited to duplicates,
+   contradictions, and stale active records exposed by the evaluation.
+5. **Portfolio handoff:** add one Agent graph, one memory-write sequence diagram,
+   an evaluation table, reproducible commands, and resume/interview bullets.
 
-The current automated evidence is `347 passed, 5 skipped` for the complete
+## Human review handoff (2026-07-12)
+
+The current review boundary adds production enqueue, the leased worker, and the
+Episode Store writer to the previously reviewed safety and Extraction core.
+Verify assistant/revision/job transactionality, User → Conversation → Job lock
+order, lease-token ownership, exact-revision/data-epoch gates, infinite privacy
+deletion retries, relational evidence matching, and Store idempotency.
+
+The current automated evidence is `352 passed, 5 skipped` for the complete
 backend suite, plus a passing frontend TypeScript check and targeted lint for
 the changed settings files. OrbStack is the active Docker context and its
 PostgreSQL service is healthy. The final full backend/frontend image rebuild is
 not part of this handoff snapshot.
 
-No production endpoint currently sends transcripts to Extraction, and no
-worker writes Episode values to LangGraph Store. The next implementation unit
-must add transactional enqueueing, relational source reload, leased retries,
-fresh consent/data/revision/crisis gates immediately before the provider and
-Store write, and an idempotent stale-write-resistant upsert. Those items remain
-open for human design review before implementation resumes.
+Production writes occur only when both global and user consent are enabled and
+all fresh relational gates pass. Remaining work is conflict-aware
+Consolidation, optional explicit-memory tooling, and the frozen multi-session
+memory evaluation; none is part of this writer delivery.
 
 `README.md` and this file are the tracked, authoritative documentation in the
 handoff commits. `docs/develop.md`, `docs/system_arch.md`, and

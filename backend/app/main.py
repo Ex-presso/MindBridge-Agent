@@ -1,4 +1,5 @@
 """MindBridge backend — FastAPI application with LangGraph checkpointing."""
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
@@ -119,6 +120,24 @@ async def lifespan(app: FastAPI):
     app.state.store = store
     app.state.memory_vector_enabled = memory_runtime.vector_enabled
 
+    # 2c. A single lightweight leased worker drains extraction and privacy
+    # deletion jobs. SKIP LOCKED keeps this safe if the API is later replicated.
+    memory_worker_stop = asyncio.Event()
+    memory_worker_task = None
+    if settings.MEMORY_WORKER_ENABLED:
+        from app.services.memory_worker import run_memory_worker
+
+        memory_worker_task = asyncio.create_task(
+            run_memory_worker(
+                AsyncSessionLocal,
+                store,
+                vector_enabled=memory_runtime.vector_enabled,
+                stop_event=memory_worker_stop,
+            ),
+            name="memory-worker",
+        )
+    app.state.memory_worker_task = memory_worker_task
+
     # 3. Create system agents (only for providers with keys in .env — used by legacy endpoint)
     from app.core.agent.agent import Agent
     app.state.stateless_agents = {}
@@ -141,11 +160,15 @@ async def lifespan(app: FastAPI):
             logger.warning("Failed to create Google agent: %s", e)
 
     logger.info("MindBridge backend ready.")
-    yield
-
-    # Cleanup
-    logger.info("Shutting down...")
-    await pool.close()
+    try:
+        yield
+    finally:
+        logger.info("Shutting down...")
+        if memory_worker_task is not None:
+            memory_worker_stop.set()
+            memory_worker_task.cancel()
+            await asyncio.gather(memory_worker_task, return_exceptions=True)
+        await pool.close()
 
 
 # ── App ───────────────────────────────────────────────────────────────────────

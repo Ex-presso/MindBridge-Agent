@@ -95,6 +95,32 @@ async def get_memory_access_for_chat(
     )
 
 
+async def get_memory_access_for_worker(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> MemoryAccessSnapshot | None:
+    """Take FOR SHARE so consent and credential writes wait for Extraction."""
+    result = await db.execute(
+        select(
+            User.memory_enabled,
+            User.memory_consent_version,
+            User.memory_data_epoch,
+            User.account_deletion_pending,
+        )
+        .where(User.id == user_id)
+        .with_for_update(read=True)
+    )
+    row = result.one_or_none()
+    if row is None:
+        return None
+    return MemoryAccessSnapshot(
+        enabled=bool(row[0]),
+        consent_version=int(row[1]),
+        data_epoch=int(row[2]),
+        account_deletion_pending=bool(row[3]),
+    )
+
+
 async def get_memory_access_for_update(
     db: AsyncSession,
     user_id: uuid.UUID,

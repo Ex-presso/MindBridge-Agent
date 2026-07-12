@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     MEMORY_EPISODE_TOPIC_MAX_CHARS: int = Field(default=80, ge=10, le=500)
     MEMORY_CONTEXT_MAX_CHARS: int = Field(default=4000, ge=500, le=20000)
     MEMORY_EMBED_DIMS: int = Field(default=1024, ge=1)
+    # One lightweight in-process outbox worker. It remains enabled when the
+    # memory kill switch is off so previously queued privacy deletions still run.
+    MEMORY_WORKER_ENABLED: bool = True
+    MEMORY_WORKER_POLL_SECONDS: float = Field(default=1.0, ge=0.1, le=60.0)
+    MEMORY_WORKER_LEASE_SECONDS: int = Field(default=90, ge=35, le=600)
+    MEMORY_WORKER_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=10)
 
     # Embedding settings: "sentence_transformers", "local" (LM Studio / Ollama), or "gemini"
     EMBEDDING_PROVIDER: str = "sentence_transformers"

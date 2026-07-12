@@ -7,7 +7,7 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 - **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.909 on a hand-labeled benchmark), with a bounded tool-call loop.
 - **Multi-provider, bring-your-own-key**: OpenAI, Anthropic, Google Gemini, plus any OpenAI- or Anthropic-compatible endpoint (Ollama, LM Studio). Per-user keys are Fernet-encrypted at rest.
 - **Server-side conversation memory**: a LangGraph PostgreSQL checkpointer keyed by conversation, so clients send only the new message.
-- **Opt-in long-term memory foundation**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe read-only Selection, a durable write-safety outbox, and a schema-validated Extraction core; automatic writing is intentionally not enabled yet.
+- **Opt-in long-term memory**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe Selection, grounded Extraction, and a leased idempotent Episode writer.
 - **Real token-level SSE streaming** with optimistic UI updates.
 - **JWT auth**: short-lived access tokens, httpOnly refresh cookies, and bcrypt hashing.
 - **Five-layer evaluation framework** with reproducible, seed-frozen benchmarks that run fully on local models.
@@ -64,6 +64,10 @@ non-empty placeholder API key if the local server does not require auth. Use
 `http://127.0.0.1:1234/v1` when the backend runs directly on the host, but use
 `http://host.docker.internal:1234/v1` when the backend runs in
 Compose/OrbStack—container-local `127.0.0.1` does not reach LM Studio on macOS.
+
+Long-term memory remains opt-in. Set `MEMORY_ENABLED=true`, then let each user
+enable it in Settings. The lightweight outbox worker starts by default; it also
+runs while the kill switch is off so previously queued privacy deletions drain.
 
 With the default `AUTO_CREATE_TABLES=true`, local and Docker startup runs the
 Alembic migration chain automatically. It recognizes the known pre-write-safety

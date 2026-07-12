@@ -76,6 +76,48 @@ def _episode_guard(db, user_id: uuid.UUID):
     return guard
 
 
+async def _enqueue_episode_after_success(
+    db,
+    *,
+    user_id: uuid.UUID,
+    conversation,
+    target_revision: int,
+    user_message,
+    assistant_message,
+    api_key,
+    provider: str,
+    model: str,
+) -> None:
+    """Capture a successful turn in the same transaction as its revision."""
+    if not settings.MEMORY_ENABLED:
+        return
+    access = await user_repo.get_memory_access_snapshot(db, user_id)
+    if (
+        access is None
+        or not access.enabled
+        or access.account_deletion_pending
+        or conversation.memory_crisis_seen
+        or not conversation.memory_crisis_reviewed
+        or conversation.memory_crisis_review_version
+        != CRISIS_DETECTOR_VERSION
+    ):
+        return
+    await memory_job_repo.enqueue_extract_episode(
+        db,
+        user_id=user_id,
+        conversation_id=conversation.id,
+        target_revision=target_revision,
+        consent_version=access.consent_version,
+        data_epoch=access.data_epoch,
+        source_user_message_id=user_message.id,
+        source_assistant_message_id=assistant_message.id,
+        api_key_id=api_key.id,
+        provider=provider,
+        model=model,
+        base_url=api_key.base_url,
+    )
+
+
 def _get_agent(
     provider: str,
     model: str | None,
@@ -336,7 +378,12 @@ async def session_chat(
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
     # Save user message
-    await message_repo.create(db, conversation_id=conv.id, role="user", content=body.message)
+    user_message = await message_repo.create(
+        db,
+        conversation_id=conv.id,
+        role="user",
+        content=body.message,
+    )
     current_crisis = detect_crisis(body.message) is not None
     transitioned = False
     if (
@@ -464,7 +511,7 @@ async def session_chat(
                                             raise RuntimeError(
                                                 "Model returned an empty response."
                                             )
-                                        await message_repo.create(
+                                        assistant_message = await message_repo.create(
                                             session,
                                             conversation_id=conv.id,
                                             role="assistant",
@@ -477,9 +524,20 @@ async def session_chat(
                                             session,
                                             conv.id,
                                         )
-                                        await conversation_repo.increment_memory_revision(
+                                        target_revision = await conversation_repo.increment_memory_revision(
                                             session,
                                             conv.id,
+                                        )
+                                        await _enqueue_episode_after_success(
+                                            session,
+                                            user_id=user.id,
+                                            conversation=locked_conv,
+                                            target_revision=target_revision,
+                                            user_message=user_message,
+                                            assistant_message=assistant_message,
+                                            api_key=run_key_record,
+                                            provider=provider,
+                                            model=body.model,
                                         )
                                         completed = True
                 except Exception:
@@ -595,7 +653,7 @@ async def session_chat(
                 )
                 if not reply.strip():
                     raise RuntimeError("Model returned an empty response.")
-                await message_repo.create(
+                assistant_message = await message_repo.create(
                     session,
                     conversation_id=conv.id,
                     role="assistant",
@@ -605,7 +663,21 @@ async def session_chat(
                     tokens_used=usage.get("total"),
                 )
                 await conversation_repo.touch(session, conv.id)
-                await conversation_repo.increment_memory_revision(session, conv.id)
+                target_revision = await conversation_repo.increment_memory_revision(
+                    session,
+                    conv.id,
+                )
+                await _enqueue_episode_after_success(
+                    session,
+                    user_id=user.id,
+                    conversation=locked_conv,
+                    target_revision=target_revision,
+                    user_message=user_message,
+                    assistant_message=assistant_message,
+                    api_key=run_key_record,
+                    provider=provider,
+                    model=body.model,
+                )
     except HTTPException:
         raise
     except Exception as exc:
