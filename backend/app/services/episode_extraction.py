@@ -7,9 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import json
 import logging
-import re
 from typing import Any, Literal
-import unicodedata
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tracers.context import tracing_v2_callback_var
@@ -22,6 +20,7 @@ from app.schemas.episode_extraction import (
     EpisodeDraft,
     EpisodeSourceMessage,
 )
+from app.services.episode_filters import filter_draft
 
 
 logger = logging.getLogger(__name__)
@@ -38,157 +37,6 @@ _MAX_SOURCE_MESSAGES = 40
 _MAX_TRANSCRIPT_CHARS = 12_000
 _MAX_OUTPUT_TOKENS = 2_048
 _INVOCATION_TIMEOUT_SECONDS = 30.0
-
-_DIAGNOSTIC_TERM_PATTERN = re.compile(
-    r"""
-    (?:
-        \b(?:
-            generalized\s+anxiety(?:\s+disorder)?
-            | anxiety\s+disorder
-            | gad
-            | borderline\s+personality\s+disorder
-            | bpd
-            | obsessive[\s\-\u2010-\u2015]+compulsive(?:\s+disorder)?
-            | ocd
-            | psychotic(?:\s+(?:disorder|episode|symptoms?))?
-            | psychosis
-            | post[\s\-\u2010-\u2015]+traumatic\s+stress\s+disorder
-            | ptsd
-            | attention[\s\-\u2010-\u2015]+deficit(?:/hyperactivity|\s+hyperactivity)?\s+disorder
-            | adhd
-            | major\s+depress(?:ion|ive\s+disorder)
-            | depression
-            | depressive\s+disorder
-            | mdd
-            | bipolar(?:\s+disorder)?
-            | schizophren(?:ia|ic|iform)
-            | schizoaffective(?:\s+disorder)?
-            | autism(?:\s+spectrum\s+disorder)?
-            | autistic
-            | asd
-            | panic\s+disorder
-            | personality\s+disorder
-            | eating\s+disorder
-            | dissociative\s+disorder
-            | anorexia(?:\s+nervosa)?
-            | bulimia(?:\s+nervosa)?
-            | dysthymia
-            | agoraphobia
-            | hypomania
-            | tourette'?s?(?:\s+syndrome)?
-            | tic\s+disorder
-            | insomnia
-            | hypersomnia
-            | narcolepsy
-            | gender\s+dysphoria
-            | body\s+dysmorph(?:ia|ic\s+disorder)
-            | depersonalization
-            | derealization
-            | cyclothymia
-        )\b
-        | 广泛性焦虑(?:症|障碍)?
-        | 焦虑(?:症(?!状|狀)|障碍|障礙)
-        | 惊恐障碍
-        | 强迫(?:症|障碍)
-        | 重度抑郁(?:症|障碍)?
-        | 抑郁症
-        | 双相(?:情感)?障碍
-        | 精神分裂(?:症|障碍)?
-        | 分裂情感性障碍
-        | 精神病性(?:症状|障碍)?
-        | 边缘型人格障碍
-        | 人格障碍
-        | 创伤后应激障碍
-        | 注意(?:力)?缺陷(?:与)?多动障碍
-        | 自闭症
-        | 孤独症
-        | 自闭谱系障碍
-        | 进食障碍
-        | 厌食症
-        | 厭食症
-        | 贪食症
-        | 貪食症
-        | 暴食症
-        | 解离性障碍
-        | 失眠(?:症)?
-        | 嗜睡症
-        | 发作性睡病
-        | 發作性嗜睡病
-        | 妥瑞症
-        | 抽动(?:秽语)?综合征
-        | 抽動(?:穢語)?綜合徵
-        | 性别(?:焦虑|不安)
-        | 性別(?:焦慮|不安)
-        | 躯体变形障碍
-        | 軀體變形障礙
-    )
-    """,
-    re.VERBOSE,
-)
-
-_DIAGNOSIS_ASSERTION_PATTERN = re.compile(
-    r"""
-    (?:
-        \b(?:diagnos(?:ed|is)|meets?\s+(?:the\s+)?criteria\s+for
-        | clinically\s+consistent\s+with|symptoms?\s+(?:suggest|indicate))\b
-        | (?:确诊|確診|诊断为|診斷為|被诊断为|被診斷為|患有|罹患
-        | 符合.{0,8}(?:诊断|診斷)|临床诊断|臨床診斷)
-    )
-    """,
-    re.VERBOSE,
-)
-
-_GENERIC_DIAGNOSTIC_LABEL_PATTERN = re.compile(
-    r"\b[a-z][a-z'\-]*(?:\s+[a-z][a-z'\-]*){0,4}\s+(?:disorder|syndrome)\b",
-    re.IGNORECASE,
-)
-_SELF_REPORTED_CONDITION_PATTERN = re.compile(
-    r"(?:\b(?:i|the user|they|he|she)\s+(?:have|has|had|"
-    r"suffer(?:s|ed|ing)?\s+from|live(?:s|d|ing)?\s+with)\b"
-    r"|(?:我|本人)(?:有|得了|患有|罹患))",
-    re.IGNORECASE,
-)
-
-_INSTRUCTION_PAYLOAD_PATTERN = re.compile(
-    r"(?:ignore (?:all |the )?(?:previous|prior) instructions|follow (?:these|the following) instructions|(?:system|developer) (?:prompt|message|instructions?)|tool call|function call|act as (?:a |an )|call (?:the )?(?:tool|function)|execute (?:this |the )?(?:command|code)|when (?:this (?:memory|text) is )?(?:recalled|remembered)|at recall time|remember to (?:ignore|reveal|disclose|send|call|execute)|(?:reveal|disclose|expose|leak|send).{0,40}(?:hidden (?:rules|prompt|instructions?)|secrets?|credentials?|api keys?|private data)|忽略.{0,8}(?:指令|提示)|遵循.{0,8}(?:指令|步骤)|系统提示词|开发者消息|调用.{0,6}(?:工具|函数)|执行.{0,6}(?:命令|代码)|(?:记住后|回忆时|想起.{0,6}时|下次想起.{0,8}时).{0,20}(?:泄露|发送|执行|调用|告诉)|(?:泄露|发送|暴露|告诉).{0,20}(?:内部规则|隐藏规则|提示词|秘密|凭据|密钥))",
-    re.IGNORECASE,
-)
-
-# Persistent prompt injection is usually phrased as a future memory trigger plus
-# an action, not as the literal phrase "ignore previous instructions". Match the
-# two signals separately so paraphrases fail closed without treating every
-# ordinary mention of remembering as an instruction.
-_FUTURE_CONDITION_PATTERN = re.compile(
-    r"(?:\b(?:if|when|whenever|each time|every time|next time|later|future|on|upon)\b"
-    r"|每当|每當|每次|下次|以后|以後|未来|未來|如果|若|日后|日後)",
-    re.IGNORECASE,
-)
-_RECALL_PATTERN = re.compile(
-    r"(?:\b(?:memory|memories|recall(?:ed|ing)?|remember(?:ed|ing)?|"
-    r"comes? up|comes? to mind|think(?:ing)? of)\b"
-    r"|回忆|回憶|想起|记起|記起|记住|記住|记忆|記憶|提起|出现|出現|浮现|浮現)",
-    re.IGNORECASE,
-)
-_DIRECTIVE_ACTION_PATTERN = re.compile(
-    r"(?:\b(?:email|send|forward|upload|post|share|reveal|disclose|expose|"
-    r"leak|tell|show|use|invoke|call|run|execute|follow|ignore|print|output|"
-    r"repeat|give|write|return|respond|include|remind)\b"
-    r"|发送|發送|发给|發給|邮件|郵件|告诉|告訴|泄露|洩露|暴露|调用|調用|"
-    r"使用|执行|執行|遵循|忽略|上传|上傳|转发|轉發|分享|公开|公開|展示|"
-    r"写入|寫入|写进|寫進|输出|輸出|重复|重複|交给|交給|打印|列印|回复|"
-    r"回覆|返回|提醒)",
-    re.IGNORECASE,
-)
-_SENSITIVE_PAYLOAD_PATTERN = re.compile(
-    r"(?:\b(?:passwords?|secrets?|credentials?|api[ -]?keys?|access[ -]?tokens?|"
-    r"private data|personal data|hidden rules?|internal rules?|system prompts?|"
-    r"developer messages?|conversation history|transcripts?)\b"
-    r"|密码|密碼|口令|秘密|凭据|憑據|密钥|密鑰|金钥|金鑰|令牌|私人数据|"
-    r"私人資料|私密数据|私密資料|个人数据|個人資料|隐藏规则|隱藏規則|"
-    r"内部规则|內部規則|系统提示|系統提示|开发者消息|開發者訊息|"
-    r"对话记录|對話記錄|聊天记录|聊天記錄)",
-    re.IGNORECASE,
-)
 
 _SYSTEM_PROMPT = """You create a compact rolling synopsis of a mental-health support conversation.
 
@@ -430,58 +278,6 @@ def _with_bounded_structured_output(llm: Any) -> Any:
     )
 
 
-def _normalized_for_filter(value: str) -> str:
-    return unicodedata.normalize("NFKC", value).casefold()
-
-
-def _contains_persistent_instruction(value: str) -> bool:
-    if not (
-        _FUTURE_CONDITION_PATTERN.search(value)
-        and _RECALL_PATTERN.search(value)
-    ):
-        return False
-    # Sensitive data paired with a future recall trigger is unsafe regardless
-    # of the verb used. Keeping this ahead of the action vocabulary prevents
-    # paraphrases such as "publish", "broadcast", or "copy" from bypassing
-    # the guard while ordinary first-person recall statements remain allowed.
-    if _SENSITIVE_PAYLOAD_PATTERN.search(value):
-        return True
-    action = _DIRECTIVE_ACTION_PATTERN.search(value)
-    if action is None:
-        return False
-    prefix = value[: action.start()]
-    return bool(
-        re.search(r"\byou\b", prefix, re.IGNORECASE)
-        or re.search(r"(?:^|[,;:])\s*(?:please\s+)?$", prefix, re.IGNORECASE)
-        or re.search(r"(?:请|請|就|把|将|將)\s*$", prefix)
-    )
-
-
-def _filter_code(draft: EpisodeDraft) -> EpisodeExtractionStatus | None:
-    values = [
-        value
-        for claim in draft.claims
-        for value in (claim.claim, claim.evidence_quote)
-    ]
-    values.extend(draft.topics)
-    normalized = [_normalized_for_filter(value) for value in values]
-    if any(
-        _DIAGNOSTIC_TERM_PATTERN.search(value)
-        or _DIAGNOSIS_ASSERTION_PATTERN.search(value)
-        or (
-            _GENERIC_DIAGNOSTIC_LABEL_PATTERN.search(value)
-            and _SELF_REPORTED_CONDITION_PATTERN.search(value)
-        )
-        for value in normalized
-    ):
-        return "filtered_diagnosis"
-    if any(_INSTRUCTION_PAYLOAD_PATTERN.search(value) for value in normalized):
-        return "filtered_instruction"
-    if any(_contains_persistent_instruction(value) for value in normalized):
-        return "filtered_instruction"
-    return None
-
-
 def _contains_crisis(
     messages: Sequence[EpisodeSourceMessage],
     prior: EpisodeDraft | None,
@@ -542,7 +338,7 @@ async def extract_episode_draft(
             error_code="filtered_crisis",
         )
     if prior is not None:
-        prior_filter = _filter_code(prior)
+        prior_filter = filter_draft(prior)
         if prior_filter is not None:
             return EpisodeExtractionOutcome(
                 status=prior_filter,
@@ -551,6 +347,10 @@ async def extract_episode_draft(
 
     prompt = _build_prompt(messages, prior)
 
+    # Provider exceptions can embed transcript content, so sanitized errors are
+    # raised outside the except block: only that keeps __context__ None, which
+    # the privacy tests assert. "raise ... from None" alone merely hides it.
+    structured_llm: Any = None
     structured_error_type: str | None = None
     try:
         structured_llm = _with_bounded_structured_output(llm)
@@ -565,6 +365,7 @@ async def extract_episode_draft(
             "Episode structured output is unsupported."
         ) from None
 
+    result: Any = None
     invocation_error_type: str | None = None
     timed_out = False
     try:
@@ -639,7 +440,7 @@ async def extract_episode_draft(
             output_tokens=output_tokens,
         )
 
-    filtered = _filter_code(draft)
+    filtered = filter_draft(draft)
     if filtered is not None:
         return EpisodeExtractionOutcome(
             status=filtered,

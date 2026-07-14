@@ -70,4 +70,9 @@ def test_005_downgrade_preserves_account_and_crisis_review_gates(pending: bool):
     assert "account_deletion_pending" in bind.sql[-1]
     assert "memory_crisis_reviewed" in bind.sql[-1]
     assert "memory_crisis_review_version" in bind.sql[-1]
-    assert migration.CRISIS_DETECTOR_VERSION == CRISIS_DETECTOR_VERSION
+    # Migration 005 froze the detector version it shipped with. Every live
+    # bump must be recorded here after re-checking the downgrade guard: rows
+    # reviewed at a newer version make the preflight fail closed, which is
+    # the intended behavior. Reviewed bumps: 3 -> 4 (English-only detection).
+    assert migration.CRISIS_DETECTOR_VERSION == 3
+    assert CRISIS_DETECTOR_VERSION == 4

@@ -42,33 +42,6 @@ def test_detects_self_harm(text):
 @pytest.mark.parametrize(
     "text",
     [
-        "用户已经计划今晚自杀",
-        "我想死",
-        "不想活了",
-        "结束自己的生命",
-        "割腕吞药",
-        "我不想活了。",
-        "我想结束自己的生命。",
-        "我要去死。",
-        "我准备结束生命。",
-        "我打算伤害自己。",
-        "我会伤害自己。",
-        "我想結束自己的生命。",
-        "我不想活著了。",
-        "我想自殘。",
-        "我准备割腕吞药。",
-        "最近总有自杀的念头。",
-        "活着没有意义。",
-        "我不想再醒来。",
-    ],
-)
-def test_detects_chinese_self_harm(text):
-    assert detect_crisis(text) == "self_harm"
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
         "I'm so anxious about my exam tomorrow.",
         "Work has been really stressful lately.",
         "I had a fight with my partner and feel sad.",
@@ -88,37 +61,8 @@ def test_no_false_positive_on_ordinary_distress(text):
     assert detect_crisis(text) is None
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "笑死我了。",
-        "今天真的累死了。",
-        "杀死进程后重新启动服务。",
-        "这个项目快把我逼死了。",
-        "我不想活得这么累。",
-        "我想死你了，什么时候回来？",
-        "我决定死了这条心。",
-    ],
-)
-def test_no_false_positive_on_chinese_idioms_or_technical_language(text):
-    assert detect_crisis(text) is None
-
-
 def test_detects_harm_to_others():
     assert detect_crisis("I want to hurt someone badly.") == "harm_to_others"
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "我要杀了他",
-        "计划伤害同事",
-        "我计划伤害同事。",
-        "我已经决定今晚攻击那个邻居。",
-    ],
-)
-def test_detects_chinese_harm_to_others(text):
-    assert detect_crisis(text) == "harm_to_others"
 
 
 def test_resources_block_always_appended():

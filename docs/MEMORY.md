@@ -128,10 +128,11 @@ The Episode writer uses the following production gates and deletion primitives:
 - Existing conversations are migrated with `memory_crisis_reviewed=false` and
   `memory_crisis_review_version=0`, so they remain ineligible. On their next
   user turn, the complete relational user history is scanned by the current
-  bilingual deterministic crisis detector under the Conversation lock. The
-  current `CRISIS_DETECTOR_VERSION` is `3`; only a completed clean review at
-  that version makes the conversation eligible. A future detector-version bump
-  automatically forces another review before Selection or Extraction.
+  deterministic crisis detector under the Conversation lock. The current
+  `CRISIS_DETECTOR_VERSION` is `4` (version 4 narrowed detection to English
+  only, matching the product's supported language); only a completed clean
+  review at that version makes the conversation eligible. A detector-version
+  bump automatically forces another review before Selection or Extraction.
 - `memory_jobs` is a durable outbox with operation/status constraints, source
   and version fields, leases, retry metadata, and a unique dedupe key. Clear and
   account deletion cancel unfinished jobs transactionally. Composite foreign
@@ -269,8 +270,19 @@ time. Parsing/filtering failures return bounded content-safe codes; unsupported
 schema, timeout, and invocation failures raise sanitized typed exceptions for
 the worker's retry classifier.
 
+Some OpenAI-compatible servers return a successful structured response with an
+empty standard `content` field while placing the exact JSON object in
+`reasoning_content`. MindBridge handles that response-envelope mismatch only in
+the `openai_compatible` adapter: the SDK call must be a structured parse,
+`content` must be empty, there must be no refusal, and the entire reasoning
+field must decode with one `json.loads` call to an object. The raw reasoning is
+not copied into message content or logs. Official OpenAI calls keep the native
+client path, and every recovered object still passes the same `EpisodeDraft`,
+grounding, crisis, diagnosis, and instruction gates. This is provider
+compatibility, not additional model authority over memory.
+
 Before any provider call, the whole draft is rejected if a supplied or prior
-source trips the bilingual deterministic crisis detector. NFKC-normalized
+source trips the deterministic crisis detector. NFKC-normalized
 diagnosis and persisted-instruction filters run after parsing; common text
 whitespace is JSON-escaped while NUL, format, and other unsafe control
 characters are rejected. Filtered or invalid drafts are not persisted. Prior
@@ -279,14 +291,15 @@ prompt, then every returned citation is checked against the full message again.
 The worker always includes the current turn and caps source input at 40 records
 and 12,000 characters.
 
-An LM Studio probe on 2026-07-11 confirmed that `/v1/models` and the
-OpenAI-compatible chat endpoint are reachable. The loaded
-`nvidia/nemotron-3-nano-4b` preset placed schema JSON only in
-`reasoning_content` while leaving standard `message.content` empty, even with
-thinking disabled. That preset is therefore rejected for Extraction; MindBridge
-does not parse private reasoning as a compatibility fallback. It remains usable
-for generator evaluation, and Extraction requires a model/preset that returns
-the schema in standard structured content.
+LM Studio probes on 2026-07-12 confirmed the host endpoint at
+`http://127.0.0.1:1234`, live LangChain recovery for
+`qwen3.5-27b-claude-4.6-opus-distilled-mlx@4bit`, and a 1,024-dimensional
+response from `text-embedding-mxbai-embed-large-v1`. OrbStack services use
+`http://host.docker.internal:1234/v1`. The local embedding adapter disables
+client-side token-ID batching so LM Studio receives its supported string input.
+The Qwen preset ignores both tested no-thinking flags, so Extraction keeps the
+scoped envelope adapter and the existing 30-second timeout instead of relying
+on model-specific prompt switches.
 
 ## Privacy invariants
 
@@ -303,6 +316,9 @@ following invariants before a transcript reaches Extraction or Store:
   memory in the first version.
 - Stored memory is rendered as untrusted structured data, never as executable
   instructions.
+- The supported product language is English. The crisis detector and the
+  diagnosis/instruction filter vocabularies are English-only by scope; text in
+  other languages is not covered by these deterministic gates.
 
 Every chat transaction takes a `User FOR KEY SHARE` deletion barrier before any
 Conversation lock or child-FK insert. Account deletion takes `User FOR UPDATE`,
@@ -386,8 +402,9 @@ fail-closed. They must be re-derived with grounded `claims` and a
    deterministic crisis/diagnosis/instruction filters, and sanitized failures.
 6. **Complete:** enqueue completed turns and add the leased worker, bounded
    retries, relational source reload, and idempotent Episode upsert/deletion.
-7. **Next:** run three production smoke paths with OrbStack and a local model
-   that returns structured output in standard `message.content`.
+7. **Next:** finish three production smoke paths with OrbStack. Local chat-schema
+   compatibility and the 1,024-dimensional embedding endpoint have passed
+   preflight; the remaining proof is the API-level write/recall/privacy flow.
 8. Freeze a 12–20 case multi-session memory on/off evaluation covering recall,
    evidence accuracy, irrelevant-memory rejection, user isolation, deletion,
    crisis filtering, prompt injection, latency, and token cost.
@@ -422,11 +439,17 @@ Verify assistant/revision/job transactionality, User → Conversation → Job lo
 order, lease-token ownership, exact-revision/data-epoch gates, infinite privacy
 deletion retries, relational evidence matching, and Store idempotency.
 
-The current automated evidence is `352 passed, 5 skipped` for the complete
-backend suite, plus a passing frontend TypeScript check and targeted lint for
-the changed settings files. OrbStack is the active Docker context and its
-PostgreSQL service is healthy. The final full backend/frontend image rebuild is
-not part of this handoff snapshot.
+The current automated evidence is `298 passed, 5 skipped` for the complete
+backend suite with `ruff check backend` clean under the default rules; CI now
+gates the backend on that baseline. The suite count reflects two cleanups: a
+`tests/conftest.py` baseline now pins `MEMORY_ENABLED` so a developer `.env`
+cannot change test behavior (a `.env` flip had silently broken nine chat-lock
+tests), and the English-only product-scope decision removed the Chinese
+detector/filter branches, their test cases, and bumped
+`CRISIS_DETECTOR_VERSION` to `4`. The LM Studio compatibility increment adds
+two focused regression tests, and a live LangChain schema probe recovers
+`{"status":"ok"}` without copying reasoning text. The three API-level memory
+smoke paths remain the next runtime review boundary.
 
 Production writes occur only when both global and user consent are enabled and
 all fresh relational gates pass. Remaining work is conflict-aware
