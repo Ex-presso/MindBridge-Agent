@@ -6,7 +6,6 @@ from typing import Optional
 from langchain_core.vectorstores.base import VectorStoreRetriever
 
 from app.core.rag.vector_store import VectorStore
-from config.settings import settings
 
 _vector_store: Optional[VectorStore] = None
 _lock = asyncio.Lock()
@@ -32,14 +31,17 @@ def _load_store_sync() -> VectorStore:
 
 async def _ensure_vector_store() -> VectorStore:
     global _vector_store
-    if _vector_store is not None:
-        return _vector_store
+    store = _vector_store
+    if store is not None:
+        return store
 
     async with _lock:
-        if _vector_store is None:
+        store = _vector_store
+        if store is None:
             loop = asyncio.get_event_loop()
-            _vector_store = await loop.run_in_executor(None, _load_store_sync)
-    return _vector_store
+            store = await loop.run_in_executor(None, _load_store_sync)
+            _vector_store = store
+    return store
 
 
 async def get_retriever(k: int | None = None) -> VectorStoreRetriever:

@@ -2,7 +2,7 @@
 import base64
 import hashlib
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 
 from config.settings import settings
 

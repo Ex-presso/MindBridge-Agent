@@ -15,10 +15,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Critical errors only (syntax, undefined names) — not style — so CI
-      # catches real breakage without churning on formatting.
+      # Backend holds the default ruff baseline; evaluation/analysis scripts
+      # only gate on critical errors (syntax, undefined names).
       - name: Lint
-        run: uvx ruff check --select E9,F63,F7,F82 backend evaluation analysis
+        run: |
+          uvx ruff check backend
+          uvx ruff check --select E9,F63,F7,F82 evaluation analysis
 
       - name: Backend tests
         working-directory: backend

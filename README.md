@@ -51,10 +51,6 @@ cp backend/.env.example backend/.env   # set SECRET_KEY for production
 docker compose up -d
 ```
 
-On macOS with OrbStack, select it first with `docker context use orbstack`.
-That step is not needed on Linux/Windows or when another Docker context is
-intentionally in use. This workspace is tested with OrbStack rather than Colima.
-
 Open [http://localhost:3000](http://localhost:3000), create an account, add your API key under **Settings**, and start chatting. The backend runs at `:8080`, with interactive API docs at [http://localhost:8080/docs](http://localhost:8080/docs).
 
 For LM Studio, verify the OpenAI-compatible server on the host with
@@ -63,27 +59,18 @@ For LM Studio, verify the OpenAI-compatible server on the host with
 non-empty placeholder API key if the local server does not require auth. Use
 `http://127.0.0.1:1234/v1` when the backend runs directly on the host, but use
 `http://host.docker.internal:1234/v1` when the backend runs in
-Compose/OrbStack—container-local `127.0.0.1` does not reach LM Studio on macOS.
+Docker—container-local `127.0.0.1` does not reach LM Studio on macOS.
 
 Long-term memory remains opt-in. Set `MEMORY_ENABLED=true`, then let each user
 enable it in Settings. The lightweight outbox worker starts by default; it also
 runs while the kill switch is off so previously queued privacy deletions drain.
 
 With the default `AUTO_CREATE_TABLES=true`, local and Docker startup runs the
-Alembic migration chain automatically. It recognizes the known pre-write-safety
-schemas created by SQLAlchemy `create_all` and upgrades them from revision `001`
-or `002`. Partial schemas and any unversioned layout carrying `004`/`005`
-write-safety markers stop with an actionable error instead of being stamped by
-column names alone; operators must verify its types and constraints before an
-explicit stamp. Full type and constraint fingerprinting for older `001`/`002`
-layouts remains a later hardening step. Migration `004` also refuses to choose
-between duplicate per-provider API keys; resolve duplicates manually and rerun
-the migration. Revision `005` adds account-deletion barriers, historical crisis
-review, and database-enforced outbox ownership.
-
+Alembic migration chain automatically, adopting known legacy `create_all`
+schemas and stopping with an actionable error on layouts it cannot verify.
 Production deployments should set `AUTO_CREATE_TABLES=false` and run
-`cd backend && uv run alembic upgrade head` as an explicit release step before
-starting the API.
+`cd backend && uv run alembic upgrade head` as an explicit release step. See
+[docs/MEMORY.md](docs/MEMORY.md) for migration and data-safety details.
 
 <details>
 <summary>Local development without Docker</summary>

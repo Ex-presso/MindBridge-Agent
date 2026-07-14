@@ -80,7 +80,6 @@ class Agent:
     """LangGraph-driven mental health agent with conditional RAG tool usage."""
 
     def __init__(self, provider_or_llm, checkpointer=None, store=None):
-        from langchain_core.language_models.chat_models import BaseChatModel
         if isinstance(provider_or_llm, str):
             base_llm = get_llm(provider_or_llm)
         else:
@@ -733,8 +732,8 @@ class Agent:
         um = getattr(message, "usage_metadata", None)
         if not um:
             return
-        for key, field in (("input", "input_tokens"), ("output", "output_tokens"), ("total", "total_tokens")):
-            usage_sink[key] = usage_sink.get(key, 0) + int(um.get(field, 0) or 0)
+        for key, usage_key in (("input", "input_tokens"), ("output", "output_tokens"), ("total", "total_tokens")):
+            usage_sink[key] = usage_sink.get(key, 0) + int(um.get(usage_key, 0) or 0)
 
     async def acomplete(self, messages: Sequence[BaseMessage]) -> str:
         """One-shot completion with no tools, graph, or system prompt.

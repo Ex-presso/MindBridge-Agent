@@ -1,11 +1,14 @@
 """Chat endpoints: legacy OpenAI-compatible + new session-aware."""
 import asyncio
+import hashlib
 import json
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -35,6 +38,9 @@ from app.services import chat as chat_service
 from app.services import conversation_service
 from config.settings import settings
 
+if TYPE_CHECKING:
+    from app.core.agent.agent import Agent
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -43,11 +49,8 @@ logger = logging.getLogger(__name__)
 # checkpointer — so one agent is safe to reuse across requests for the same
 # user and LLM config. User remains part of the key so account deletion can
 # evict every object that may retain a decrypted BYOK value.
-# ponytail: bounded LRU at 128 entries; bump if you serve many model configs.
-import hashlib
-from collections import OrderedDict
-
-_AGENT_CACHE: "OrderedDict[tuple, object]" = OrderedDict()
+# Bounded LRU at 128 entries; bump if you serve many model configs.
+_AGENT_CACHE: "OrderedDict[tuple, Agent]" = OrderedDict()
 _AGENT_CACHE_MAX = 128
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 _BACKGROUND_TASK_USERS: dict[asyncio.Task[None], str] = {}
@@ -127,7 +130,7 @@ def _get_agent(
     store=None,
     *,
     user_id: str,
-):
+) -> "Agent":
     from app.core.agent.agent import Agent
     from app.core.llm.provider import get_llm
 

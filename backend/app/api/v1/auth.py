@@ -1,5 +1,4 @@
 import asyncio
-import uuid
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +10,6 @@ from app.core.auth.password import verify_password
 from app.schemas.auth import (
     DeleteAccountRequest,
     LoginRequest,
-    RefreshRequest,
     RegisterRequest,
     TokenResponse,
     UserResponse,

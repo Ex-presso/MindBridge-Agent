@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent.agent import Agent
 from app.db.models.conversation import Conversation
-from app.db.models.message import Message
 from app.db.repositories import conversation_repo, message_repo
 from app.services.memory_service import episode_namespace
 
