@@ -79,11 +79,14 @@ def get_embeddings() -> Embeddings:
 
     elif provider == "local":
         from langchain_openai import OpenAIEmbeddings
+        from pydantic import SecretStr
 
         return OpenAIEmbeddings(
             model=settings.EMBEDDING_MODEL,
-            openai_api_base=settings.EMBEDDING_BASE_URL,
-            openai_api_key="lm-studio",  # LM Studio doesn't need a real key
+            base_url=settings.EMBEDDING_BASE_URL,
+            api_key=SecretStr("lm-studio"),  # LM Studio doesn't need a real key
+            # Send plain strings: LM Studio rejects tiktoken token-ID batches.
+            check_embedding_ctx_length=False,
         )
     elif provider == "gemini":
         from langchain_google_genai import GoogleGenerativeAIEmbeddings

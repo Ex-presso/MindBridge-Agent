@@ -1,5 +1,9 @@
 """LLM provider factory — creates chat model instances."""
+import json
+from typing import Any
+
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_openai import ChatOpenAI
 
 from config.settings import settings
 
@@ -24,6 +28,48 @@ PROVIDER_MODELS: dict[str, list[dict[str, str]]] = {
 }
 
 
+class _OpenAICompatibleChatOpenAI(ChatOpenAI):
+    """Adapt structured JSON misplaced in compatible reasoning responses."""
+
+    def _create_chat_result(
+        self,
+        response: Any,
+        generation_info: dict[str, Any] | None = None,
+    ) -> Any:
+        result = super()._create_chat_result(response, generation_info)
+        choices = getattr(response, "choices", None)
+        if not isinstance(choices, list):
+            return result
+
+        for choice, generation in zip(choices, result.generations, strict=False):
+            provider_message = getattr(choice, "message", None)
+            if provider_message is None or not hasattr(provider_message, "parsed"):
+                continue
+            if getattr(provider_message, "parsed", None) is not None:
+                continue
+            if getattr(provider_message, "content", None) not in (None, ""):
+                continue
+            if getattr(provider_message, "refusal", None):
+                continue
+
+            reasoning_content = getattr(
+                provider_message,
+                "reasoning_content",
+                None,
+            )
+            if not isinstance(reasoning_content, str):
+                continue
+            try:
+                recovered = json.loads(reasoning_content)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(recovered, dict):
+                continue
+            generation.message.additional_kwargs["parsed"] = recovered
+
+        return result
+
+
 def get_llm(
     provider: str,
     *,
@@ -40,8 +86,6 @@ def get_llm(
     temperature = settings.MODEL_TEMPERATURE
 
     if provider in ("openai", "openai_compatible"):
-        from langchain_openai import ChatOpenAI
-
         key = api_key
         if not key and settings.OPENAI_API_KEY:
             key = settings.OPENAI_API_KEY.get_secret_value()
@@ -54,7 +98,12 @@ def get_llm(
             kwargs["api_key"] = key
         if base_url:
             kwargs["base_url"] = base_url
-        return ChatOpenAI(**kwargs)
+        model_class = (
+            _OpenAICompatibleChatOpenAI
+            if provider == "openai_compatible"
+            else ChatOpenAI
+        )
+        return model_class(**kwargs)
 
     elif provider in ("anthropic", "anthropic_compatible"):
         from langchain_anthropic import ChatAnthropic
