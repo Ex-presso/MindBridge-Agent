@@ -1,10 +1,12 @@
 """Opt-in PostgreSQL integration coverage for memory write-safety transactions."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import os
 import uuid
 
 import pytest
+import pytest_asyncio
 from langgraph.store.memory import InMemoryStore
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -15,7 +17,7 @@ from app.db.models.conversation import Conversation
 from app.db.models.memory_job import MemoryJob
 from app.db.models.message import Message
 from app.db.models.user import User
-from app.db.repositories import api_key_repo, user_repo
+from app.db.repositories import api_key_repo, memory_job_repo, user_repo
 from app.services import account_service, memory_service
 from app.services.memory_selection import select_memory
 from config.settings import settings
@@ -25,6 +27,27 @@ pytestmark = pytest.mark.skipif(
     os.getenv("RUN_LOCAL_INTEGRATION") != "1",
     reason="set RUN_LOCAL_INTEGRATION=1 with an isolated migrated PostgreSQL",
 )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _drop_leftover_fixture_rows():
+    """Remove rows a previously failed test left behind.
+
+    Each test cleans up on its happy path only, so an assertion failure leaves
+    users and queued jobs in place. A later run could then lease an orphaned
+    job and report a misleading result. Deletion is scoped to this suite's
+    ``@example.com`` accounts and cascades to their conversations, messages,
+    API keys, and jobs, so it never truncates unrelated data.
+    """
+    engine = create_async_engine(settings.ASYNC_DATABASE_URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                delete(User).where(User.email.like("%@example.com"))
+            )
+    finally:
+        await engine.dispose()
+    yield
 
 
 class _RecordingCheckpointer:
@@ -510,5 +533,132 @@ async def test_memory_epochs_jobs_and_account_cascade_on_postgres():
                 memory_service.memory_user_prefix(user_id),
                 limit=10,
             ) == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_job_leasing_is_disjoint_and_lease_scoped_on_postgres():
+    """Two workers never share a job, and a stale lease cannot finish it.
+
+    Only real PostgreSQL can prove this: ``FOR UPDATE SKIP LOCKED`` is what
+    keeps a second worker from waiting on a row the first one already leased,
+    and ``lease_until`` is the ownership token that makes a timed-out worker's
+    late completion a no-op instead of clobbering the new lease.
+    """
+    engine = create_async_engine(settings.ASYNC_DATABASE_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    user_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+    lease_seconds = 90
+    max_attempts = 3
+
+    def job(dedupe: str) -> MemoryJob:
+        return MemoryJob(
+            operation="extract_episode",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            target_revision=1,
+            consent_version=1,
+            data_epoch=1,
+            dedupe_key=f"integration:lease:{dedupe}:{uuid.uuid4()}",
+        )
+
+    async def claim_in_new_session() -> uuid.UUID | None:
+        async with sessions() as worker_db:
+            async with worker_db.begin():
+                claimed = await memory_job_repo.claim_next(
+                    worker_db,
+                    lease_seconds=lease_seconds,
+                    max_attempts=max_attempts,
+                )
+                return None if claimed is None else claimed.id
+
+    try:
+        async with sessions() as setup_db:
+            setup_db.add(
+                User(
+                    id=user_id,
+                    email=f"lease-{user_id}@example.com",
+                    hashed_password="not-used",
+                )
+            )
+            await setup_db.flush()
+            setup_db.add(
+                Conversation(
+                    id=conversation_id,
+                    user_id=user_id,
+                    title="Lease contention",
+                )
+            )
+            await setup_db.flush()
+            setup_db.add_all([job("first"), job("second")])
+            await setup_db.commit()
+
+        async with sessions() as worker_a:
+            await worker_a.begin()
+            claimed_a = await memory_job_repo.claim_next(
+                worker_a,
+                lease_seconds=lease_seconds,
+                max_attempts=max_attempts,
+            )
+            assert claimed_a is not None
+            stale_lease = claimed_a.lease_until
+            assert stale_lease is not None
+
+            # Worker A still holds its row lock. Without SKIP LOCKED this call
+            # would block until A commits and the wait_for would time out.
+            claimed_b_id = await asyncio.wait_for(claim_in_new_session(), 5.0)
+            assert claimed_b_id is not None
+            assert claimed_b_id != claimed_a.id
+
+            # One row is locked and the other now carries a live lease, so a
+            # third worker is handed nothing rather than a duplicate.
+            assert await asyncio.wait_for(claim_in_new_session(), 5.0) is None
+            await worker_a.commit()
+
+        # Worker A's lease expires while its transcript is still outside
+        # PostgreSQL, so the job becomes claimable again.
+        async with sessions() as expire_db:
+            await expire_db.execute(
+                update(MemoryJob)
+                .where(MemoryJob.id == claimed_a.id)
+                .values(
+                    lease_until=datetime.now(timezone.utc) - timedelta(seconds=1)
+                )
+            )
+            await expire_db.commit()
+
+        async with sessions() as reclaim_db:
+            async with reclaim_db.begin():
+                reclaimed = await memory_job_repo.claim_next(
+                    reclaim_db,
+                    lease_seconds=lease_seconds,
+                    max_attempts=max_attempts,
+                )
+            assert reclaimed is not None
+            assert reclaimed.id == claimed_a.id
+            fresh_lease = reclaimed.lease_until
+            assert fresh_lease != stale_lease
+
+        # The superseded worker finally returns and must not write anything.
+        async with sessions() as stale_db:
+            async with stale_db.begin():
+                assert await memory_job_repo.finish_claim(
+                    stale_db,
+                    job_id=claimed_a.id,
+                    lease_until=stale_lease,
+                    status="succeeded",
+                ) is False
+
+        async with sessions() as verify_db:
+            surviving = await verify_db.get(MemoryJob, claimed_a.id)
+            assert surviving is not None
+            assert surviving.status == "processing"
+            assert surviving.lease_until == fresh_lease
+            assert surviving.error_code is None
+
+            await verify_db.execute(delete(User).where(User.id == user_id))
+            await verify_db.commit()
     finally:
         await engine.dispose()

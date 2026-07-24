@@ -431,6 +431,28 @@ fail-closed. They must be re-derived with grounded `claims` and a
 5. **Portfolio handoff:** add one Agent graph, one memory-write sequence diagram,
    an evaluation table, reproducible commands, and resume/interview bullets.
 
+## Running the PostgreSQL integration suite
+
+`tests/test_memory_postgres_integration.py` is skipped by default because the
+lock, constraint, and lease behavior it asserts cannot be reproduced by an
+in-memory double. Run it against a throwaway database:
+
+```bash
+docker run -d --name mindbridge-itest \
+  -e POSTGRES_USER=mindbridge -e POSTGRES_PASSWORD=itest \
+  -e POSTGRES_DB=mindbridge_itest -p 55432:5432 pgvector/pgvector:pg16
+
+cd backend
+export DATABASE_URL="postgresql+psycopg://mindbridge:itest@localhost:55432/mindbridge_itest"
+uv run alembic upgrade head
+RUN_LOCAL_INTEGRATION=1 uv run pytest tests/test_memory_postgres_integration.py
+```
+
+Point it at a disposable database rather than a development one: the suite
+creates and deletes its own `@example.com` accounts, and an autouse fixture
+removes accounts a previously failed run left behind so a re-run cannot lease
+an orphaned job and report a misleading result.
+
 ## Human review handoff (2026-07-12)
 
 The current review boundary adds production enqueue, the leased worker, and the
@@ -439,9 +461,18 @@ Verify assistant/revision/job transactionality, User → Conversation → Job lo
 order, lease-token ownership, exact-revision/data-epoch gates, infinite privacy
 deletion retries, relational evidence matching, and Store idempotency.
 
-The current automated evidence is `298 passed, 5 skipped` for the complete
+The current automated evidence is `298 passed, 6 skipped` for the default
 backend suite with `ruff check backend` clean under the default rules; CI now
-gates the backend on that baseline. The suite count reflects two cleanups: a
+gates the backend on that baseline. The six opt-in PostgreSQL integration tests
+also pass against a migrated throwaway database: they confirm `READ COMMITTED`
+sessions, that a chat's `FOR KEY SHARE` barrier genuinely blocks credential
+replacement and account deletion in both orderings, that composite ownership
+foreign keys reject cross-user jobs and cascade correctly, and that concurrent
+workers lease disjoint jobs while a stale lease token cannot complete a
+re-leased job. The two leasing invariants were falsified before being trusted:
+removing `skip_locked` makes the second worker block until the test times out,
+and removing the `lease_until` equality check lets a superseded worker mark the
+job succeeded. The suite count reflects two cleanups: a
 `tests/conftest.py` baseline now pins `MEMORY_ENABLED` so a developer `.env`
 cannot change test behavior (a `.env` flip had silently broken nine chat-lock
 tests), and the English-only product-scope decision removed the Chinese
