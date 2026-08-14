@@ -35,7 +35,7 @@ SemanticKind: TypeAlias = Literal[
 
 
 class SemanticMemoryValue(BaseModel):
-    """One attributable, user-approved semantic fact."""
+    """One attributable semantic fact explicitly stated by the user."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 

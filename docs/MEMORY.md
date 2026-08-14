@@ -18,11 +18,11 @@ The application currently has two working memory mechanisms:
 An `AsyncPostgresStore` is initialized alongside the checkpointer and passed to
 the compiled graph. The privacy API can inspect and clear it, conversation
 deletion removes the matching episode key, and the graph performs user-scoped
-Selection before normal chat. Successful opted-in turns now enqueue grounded
+Selection before normal chat. Successful opted-in turns enqueue grounded
 Episode Extraction in the assistant persistence transaction. A leased worker
-reloads relational evidence, applies the privacy gates, and writes an idempotent
-conversation Episode to Store. There is still no public direct-memory write API
-or automatic semantic-fact writer.
+reloads relational evidence, applies the privacy gates, writes explicit
+semantic facts, and then writes an idempotent conversation Episode to Store.
+There is still no public direct-memory write API.
 
 The privacy foundation is implemented:
 
@@ -202,7 +202,8 @@ primitive. Memory behavior remains application-controlled:
    a normal response. The read-only stage is implemented.
 2. **Extraction** derives narrowly scoped, attributable memory candidates after
    completed turns. The structured-draft core, transactional enqueue, leased
-   execution, relational revalidation, and Episode Store write are implemented.
+   execution, relational revalidation, semantic promotion, and Episode Store
+   write are implemented.
 3. **Consolidation** resolves duplicates, contradictions, and stale entries at a
    controlled cadence.
 
@@ -221,7 +222,7 @@ it does not pretend that an internal LLM draft is deterministic:
 | Subsystem | C′ trigger/authority | Current status |
 |---|---|---|
 | Selection | Harness runs it before every eligible chat; recall is not an optional model tool | Complete |
-| Extraction | Harness runs it after every eligible completed turn; the LLM may only propose a schema-bound draft | Episode path complete; semantic path planned |
+| Extraction | Harness runs it after every eligible completed turn; the LLM may only propose a schema-bound draft | Episode path and minimal semantic promotion complete |
 | Consolidation | Harness will run it at an explicit threshold/cadence | Planned after frozen evaluation |
 | `save_memory` | The only agentic memory action in the complete C′ target | Deliberately deferred |
 
@@ -234,11 +235,12 @@ Store write happens. Moving the side effect out of the graph adds retries,
 idempotency, deletion ordering, and crash recovery without putting memory policy
 under model control.
 
-The current milestone is therefore the **C′ episodic production slice**, not the
-complete three-layer endpoint. Semantic Extraction, Consolidation, and the
-single constrained `save_memory` hook remain open. Omitting that hook permanently
-would be a deliberate departure from the original full C′ definition and must
-be documented as such rather than silently relabeled.
+The current milestone is the **C′ Extraction production slice**, not the
+complete three-layer endpoint. Episode Extraction and minimal semantic
+promotion are implemented; Consolidation and the single constrained
+`save_memory` hook remain open. Omitting that hook permanently would be a
+deliberate departure from the original full C′ definition and must be
+documented as such rather than silently relabeled.
 
 The crisis policy is intentionally stricter than the early sketch: a detected
 crisis does not merely skip one turn. It sets a sticky conversation tombstone,
@@ -263,12 +265,13 @@ model-authored field. Store values persist those immutable claims together with
 OpenAI, Anthropic, Gemini, and compatible BYOK endpoints are wrapped with strict
 structured output, a 2,048-token cap, a 30-second invocation timeout, and a
 second Pydantic validation pass even when the provider returns an apparent model
-instance. Extraction explicitly disables LangSmith callbacks and tracing. Raw
-responses, transcript bodies, parsing exception text, and provider payloads are
-never logged or returned. Endpoint schema capability is checked at invocation
-time. Parsing/filtering failures return bounded content-safe codes; unsupported
-schema, timeout, and invocation failures raise sanitized typed exceptions for
-the worker's retry classifier.
+instance. The worker fixes Extraction temperature at `0`; normal chat keeps the
+configured response temperature. Extraction explicitly disables LangSmith
+callbacks and tracing. Raw responses, transcript bodies, parsing exception
+text, and provider payloads are never logged or returned. Endpoint schema
+capability is checked at invocation time. Parsing/filtering failures return
+bounded content-safe codes; unsupported schema, timeout, and invocation
+failures raise sanitized typed exceptions for the worker's retry classifier.
 
 Some OpenAI-compatible servers return a successful structured response with an
 empty standard `content` field while placing the exact JSON object in
@@ -367,18 +370,30 @@ the sole source of truth) and fault-injection tests for this boundary.
 ## Stored data model
 
 Semantic memory uses small, attributable items rather than a single unversioned
-profile document. Each item records its kind, normalized content, source thread
-and message IDs, whether it was explicitly stated, confidence, sensitivity,
-status, and confirmation timestamps. A compact profile can be derived from
-active items for prompt injection.
+profile document. The current writer promotes only four kinds from relational
+user messages already reloaded by the leased worker: explicit preferences,
+goals, helpful strategies, and important people. Fixed English patterns
+classify exact sentence spans, and every candidate passes the same deterministic
+diagnosis and persistent-instruction filter used by Episode Extraction. There
+is no second model call and no diagnosis or personality inference. Each item
+retains its source thread and message IDs, consent data epoch, status, and
+version. A deterministic key over normalized kind and content deduplicates
+equivalent facts, while a repeated statement moves attribution to the newest
+relational source.
+
+Semantic writes happen before the owning Episode write. If any Store operation
+fails, the outbox job retries; completed semantic keys are idempotent, so a
+partial external write converges without duplicate facts. Facts use
+`index=False` because Selection reads this small allow-listed profile exactly.
+Conflict resolution is intentionally not guessed from wording: superseding a
+different active fact remains the next Consolidation milestone.
 
 Episodic memory uses a dedicated rolling conversation synopsis. It must not
 reuse the working-memory compaction summary: short conversations often never
 compact, and a compaction summary intentionally omits details that an episode
 may need for later recall.
 
-For the current manual pilot, semantic records must be written with
-`index=False` and an allow-listed value such as
+Semantic records are written with `index=False` and an allow-listed value such as
 `{kind, content, status="active", explicit=true, data_epoch=...}`. Episode keys
 are conversation IDs and values contain at least
 `{conversation_id, claims=[{claim, evidence_message_id, evidence_quote}],
@@ -409,8 +424,8 @@ fail-closed. They must be re-derived with grounded `claims` and a
    covering grounded recall, irrelevant-memory rejection, user isolation,
    consent, clear, and crisis filtering. The committed local-model snapshot is
    4/6 memory-on recall, 0/6 memory-off recall, and 5/5 gates.
-9. **Next:** use those results to implement only the minimum explicit semantic facts and
-   conflict-aware Consolidation needed for a complete three-layer claim.
+9. **In progress:** the minimum explicit semantic writer is complete;
+   conflict-aware Consolidation remains before a complete three-layer claim.
 10. Implement the constrained C′ `save_memory` hook last; evaluation determines
     its narrow scope and priority, not whether an unimplemented system may be
     described as the complete C′ target.
@@ -424,10 +439,11 @@ fail-closed. They must be re-derived with grounded `claims` and a
    17-case dataset, live API runner, exact local-model configuration, row-level
    results, and summary metrics. The two retained misses distinguish response
    omission from bounded structured-Extraction failure.
-3. **Next — minimal semantic layer:** store only explicit preferences, goals, helpful
-   strategies, and important people with relational evidence. Never infer a
-   diagnosis. Deduplicate equivalent facts and supersede conflicts.
-4. **Deterministic Consolidation:** trigger by an application threshold or
+3. **Complete — minimal semantic layer:** fixed rules promote only explicit
+   preferences, goals, helpful strategies, and important people from reloaded
+   relational user text. Equivalent facts use deterministic keys; no diagnosis
+   is inferred and no second LLM call is introduced.
+4. **Next — deterministic Consolidation:** trigger by an application threshold or
    cadence, not a model tool decision. Keep the scope limited to duplicates,
    contradictions, and stale active records exposed by the evaluation.
 5. **Portfolio handoff:** add one Agent graph, one memory-write sequence diagram,
@@ -496,9 +512,19 @@ recorded 4/6 memory-on recalls, 0/6 memory-off recalls, 5/6 grounded writes,
 and 5/5 gates. The committed row-level evidence retains one response omission
 and one bounded structured-Extraction failure; see `docs/EVALUATION.md`.
 
+The minimal semantic follow-up was also accepted through the public API on
+2026-08-14. One eligible turn completed with `attempts=0` and wrote an Episode
+plus an exact, source-attributed `preference`; clear removed both items and left
+the user namespace empty. The local 4B model did not repeat the preference
+details in its later reply, so this run is evidence for enqueue, semantic write,
+Selection availability, and deletion—not a claimed semantic-recall success.
+Two preceding 4B attempts exhausted their bounded retries with
+`invalid_output`; Extraction now fixes temperature at `0`, while the strict
+schema and three-attempt limit remain unchanged.
+
 Production writes occur only when both global and user consent are enabled and
-all fresh relational gates pass. Remaining work is the minimal semantic layer,
-conflict-aware Consolidation, and optional explicit-memory tooling.
+all fresh relational gates pass. Remaining work is conflict-aware
+Consolidation and the constrained C′ explicit-memory hook.
 
 `README.md` and this file are the tracked, authoritative documentation in the
 handoff commits. `docs/develop.md`, `docs/system_arch.md`, and

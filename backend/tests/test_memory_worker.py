@@ -219,7 +219,7 @@ def test_worker_writes_grounded_episode(monkeypatch):
         ),
     )
     store = SimpleNamespace(
-        aget=AsyncMock(side_effect=[None, None]),
+        aget=AsyncMock(return_value=None),
         aput=AsyncMock(),
         adelete=AsyncMock(),
     )

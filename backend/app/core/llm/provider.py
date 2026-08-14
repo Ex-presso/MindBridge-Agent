@@ -76,6 +76,7 @@ def get_llm(
     api_key: str | None = None,
     base_url: str | None = None,
     model: str | None = None,
+    temperature: float | None = None,
 ) -> BaseChatModel:
     """Create a chat model for the given provider.
 
@@ -83,7 +84,9 @@ def get_llm(
     When api_key is None, falls back to system-wide keys from settings.
     """
     provider = provider.lower()
-    temperature = settings.MODEL_TEMPERATURE
+    resolved_temperature = (
+        settings.MODEL_TEMPERATURE if temperature is None else temperature
+    )
 
     if provider in ("openai", "openai_compatible"):
         key = api_key
@@ -92,7 +95,7 @@ def get_llm(
 
         kwargs: dict = {
             "model": model or settings.OPENAI_MODEL,
-            "temperature": temperature,
+            "temperature": resolved_temperature,
         }
         if key:
             kwargs["api_key"] = key
@@ -110,7 +113,7 @@ def get_llm(
 
         kwargs = {
             "model": model or "claude-sonnet-4-5",
-            "temperature": temperature,
+            "temperature": resolved_temperature,
         }
         if api_key:
             kwargs["api_key"] = api_key
@@ -127,7 +130,7 @@ def get_llm(
 
         kwargs = {
             "model": model or settings.GEMINI_MODEL,
-            "temperature": temperature,
+            "temperature": resolved_temperature,
         }
         if key:
             kwargs["api_key"] = key
