@@ -4,13 +4,13 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 
 ## Features
 
-- **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.909 on a hand-labeled benchmark), with a bounded tool-call loop.
+- **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.893 on 45 scored hand-labeled cases), with a bounded tool-call loop.
 - **Multi-provider, bring-your-own-key**: OpenAI, Anthropic, Google Gemini, plus any OpenAI- or Anthropic-compatible endpoint (Ollama, LM Studio). Per-user keys are Fernet-encrypted at rest.
 - **Server-side conversation memory**: a LangGraph PostgreSQL checkpointer keyed by conversation, so clients send only the new message.
 - **Opt-in long-term memory**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe Selection, grounded Extraction, and a leased idempotent Episode writer.
 - **Real token-level SSE streaming** with optimistic UI updates.
 - **JWT auth**: short-lived access tokens, httpOnly refresh cookies, and bcrypt hashing.
-- **Five-layer evaluation framework** with reproducible, seed-frozen benchmarks that run fully on local models.
+- **Five-layer evaluation framework** with seed-frozen benchmarks and versioned local-model results.
 
 ## Architecture
 
@@ -78,7 +78,7 @@ Production deployments should set `AUTO_CREATE_TABLES=false` and run
 ```bash
 # Backend (needs PostgreSQL with pgvector running)
 cd backend
-uv sync
+uv sync --locked
 uv run python -m app.core.rag.vector_store   # build vector index (first run)
 uv run python -m app.main
 
@@ -96,7 +96,7 @@ Each layer isolates one variable in the stack. Benchmarks are seed-frozen JSON i
 | Layer | What it measures | Headline result |
 |-------|------------------|-----------------|
 | Retrieval IR | Recall/NDCG/MRR over 30 queries with cluster-gold chunk labels, 9-config sweep | NDCG@5 = 0.537 (chunk_size = 2000) |
-| Agent routing | Does the agent invoke the RAG tool exactly when it should | F1 = 0.909 (n = 45 scored) |
+| Agent routing | Does the agent invoke the RAG tool exactly when it should | F1 = 0.893 (n = 45 scored; current graph re-run) |
 | Reference-based | BERTScore (baseline-rescaled) vs MentalChat16K hold-out | F1 = 0.139, cosine = 0.637 (n = 99) |
 | LLM-as-judge | Empathy/safety across 6 prompt × RAG conditions, Wilcoxon + Holm | CBT < Baseline (p = 0.004); Rogerian ≈ Baseline |
 | Safety probes | Crisis-referral / refusal on 20 high-risk probes | self-harm crisis-referral **0% → 100%**: probe suite surfaced the gap, an in-graph crisis node closed it (re-run confirmed) |
@@ -104,7 +104,7 @@ Each layer isolates one variable in the stack. Benchmarks are seed-frozen JSON i
 Two design choices are worth noting. First, the **judge is a different model family than the generator**, because same-model self-judging previously produced ceiling scores with zero significant differences. Second, the safety layer is **diagnostic by design**: it surfaced that the empathy-optimized Rogerian prompt reflected feelings without crisis routing, which an in-graph crisis-routing node then closed (self-harm crisis-referral from 0% to 100% on re-run).
 
 ```bash
-cd evaluation && uv sync
+cd evaluation && uv sync --locked
 uv run python eval_routing.py --max-queries 3   # smoke test one layer
 python ../analysis/analyze.py                   # regenerate all figures
 ```
@@ -116,7 +116,7 @@ backend/        FastAPI app: LangGraph agent, RAG, auth, async SQLAlchemy
 frontend-next/  Next.js 16 App Router chat UI
 evaluation/     Five eval layers: scripts, YAML configs, frozen benchmarks, results
 analysis/       Figure/table generation from eval results
-docs/           EVALUATION.md · system_arch.md · develop.md
+docs/           EVALUATION.md · MEMORY.md
 legacy/         Retired Gradio frontend
 ```
 

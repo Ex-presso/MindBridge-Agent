@@ -453,7 +453,7 @@ creates and deletes its own `@example.com` accounts, and an autouse fixture
 removes accounts a previously failed run left behind so a re-run cannot lease
 an orphaned job and report a misleading result.
 
-## Human review handoff (2026-07-12)
+## Human review handoff (updated 2026-08-14)
 
 The current review boundary adds production enqueue, the leased worker, and the
 Episode Store writer to the previously reviewed safety and Extraction core.
@@ -479,8 +479,15 @@ tests), and the English-only product-scope decision removed the Chinese
 detector/filter branches, their test cases, and bumped
 `CRISIS_DETECTOR_VERSION` to `4`. The LM Studio compatibility increment adds
 two focused regression tests, and a live LangChain schema probe recovers
-`{"status":"ok"}` without copying reasoning text. The three API-level memory
-smoke paths remain the next runtime review boundary.
+`{"status":"ok"}` without copying reasoning text.
+
+The API/browser runtime boundary was accepted on 2026-08-14 with OrbStack,
+PostgreSQL/pgvector, and LM Studio. A disposable user completed
+chat → transactional outbox → leased worker → Episode Store, then a second
+conversation recalled both the interview topic and preferred response style.
+The UI observed Store counts 0 → 1 → 2 → 0 across writes and clear-and-disable;
+account deletion returned to login and the user row was physically absent.
+This is a live acceptance trace, not the still-planned frozen memory A/B suite.
 
 Production writes occur only when both global and user consent are enabled and
 all fresh relational gates pass. Remaining work is conflict-aware

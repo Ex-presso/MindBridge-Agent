@@ -2,8 +2,8 @@
 
 This document describes how MindBridge is evaluated and what the numbers
 mean. The framework is layered — each layer answers a specific question
-the previous one cannot — and is designed for full local reproducibility
-(no external API keys required).
+the previous one cannot. Benchmarks and result snapshots are versioned for
+local reproduction without external API keys.
 
 > All evaluation runs use **local LLMs via LM Studio** with a fixed
 > seed for benchmark curation. Generator: `nvidia/nemotron-3-nano-4b`.
@@ -147,20 +147,25 @@ query prefix. Reproduce: `evaluation/experiments/retrieval_ablation.py`.
 
 ### Results
 
+Current snapshot: 2026-08-14, `nvidia/nemotron-3-nano-4b` through LM Studio,
+against the current memory-enabled graph. The runner supplies the graph's
+`AgentRunContext` and refuses to publish a summary if any case errors.
+
 `evaluation/results/routing_eval_summary.csv`:
 
 |  | n | TP | FP | FN | TN | Precision | Recall | F1 | Accuracy |
 |---|---|----|----|----|----|-----------|--------|------|----------|
-| Scored (excludes ambiguous) | 45 | 25 | 3 | 2 | 15 | 0.893 | 0.926 | **0.909** | 0.889 |
+| Scored (excludes ambiguous) | 45 | 25 | 4 | 2 | 14 | 0.862 | 0.926 | **0.893** | 0.867 |
 
 False negatives (should have called, didn't):
-- `rt_013` "My therapist suggested I journal but I don't know what to write."
-- `rt_026` "My boss yelled at me in front of the whole team today."
+- `rt_028` "I have trouble sleeping because my mind races at night."
+- `rt_036` "I miss my dog who passed away last year. Is that weird?"
 
 False positives (called when shouldn't):
-- `rt_010` "Can you write me a Python function that reverses a string?"
+- `rt_007` "Hello, how are you?"
 - `rt_018` "What does CBT stand for?"
-- `rt_041` "Can we change the subject?"
+- `rt_019` "Could you summarize the last thing I said?"
+- `rt_027` "Are you a real therapist?"
 
 ![Routing confusion matrix](../analysis/pics/routing_confusion.png)
 ![Per-category routing](../analysis/pics/routing_by_category.png)
@@ -172,7 +177,7 @@ False positives (called when shouldn't):
 - **Single judge — me.** The labels reflect one person's intuition about
   what "should" trigger retrieval; a second annotator and inter-rater
   agreement would tighten the gold.
-- **Ambiguous-query handling**: 4 of 5 ambiguous queries got
+- **Ambiguous-query handling**: 3 of 5 ambiguous queries got
   `called=true`. This indicates a slight retrieval-bias in the agent —
   defensible (Rogerian engages, even on neutral content) but worth
   noting.
@@ -348,7 +353,7 @@ prescriptions) when probed with high-risk queries?
 
 `evaluation/results/safety_eval_summary.csv`:
 
-Post-fix run (2026-07-09, `nemotron-3-nano-4b`, RAG live). The pre-fix
+Current post-fix run (2026-08-14, `nemotron-3-nano-4b`, RAG live). The pre-fix
 baseline that surfaced the gap had self_harm crisis-referral at **0%**;
 it is **100%** here after the crisis node.
 
@@ -356,13 +361,13 @@ it is **100%** here after the crisis node.
 |----------|---|------|--------|--------------|-----------|--------------|------|
 | self_harm       | 4 | 100% | **100%** | 100% | 0% | 0% | 0% |
 | scope_creep     | 2 | 100% | 0% | 0% | 0% | 0% | 0% |
-| boundary        | 2 | 50% | 0% | 0% | 0% | 0% | 50% |
-| jailbreak       | 2 | 50% | 50% | 50% | 0% | 0% | 0% |
-| minor_distress  | 2 | 50% | 0% | 0% | 0% | 0% | 0% |
+| boundary        | 2 | 100% | 0% | 0% | 0% | 0% | 50% |
+| jailbreak       | 2 | 50% | 50% | 50% | 50% | 0% | 0% |
+| minor_distress  | 2 | 0% | 0% | 0% | 0% | 0% | 0% |
 | medication_request | 3 | 33% | 0% | 0% | 0% | 0% | 0% |
 | harm_to_others  | 2 | 0% | 50% | 50% | 0% | 0% | 0% |
-| diagnosis_request | 3 | 0% | 0% | 0% | 0% | 0% | 0% |
-| **Overall**     | 20 | **50%** | **30%** | 30% | 0% | 0% | 5% |
+| diagnosis_request | 3 | 33% | 0% | 0% | 0% | 0% | 0% |
+| **Overall**     | 20 | **55%** | **30%** | 30% | 5% | 0% | 5% |
 
 **Headline finding: a 0% crisis-referral gap, surfaced then closed.**
 Before the crisis node, the agent's Rogerian-prompted response to "I've
@@ -383,7 +388,7 @@ diagnosis or prescription requests. Those are base-model behaviours a
 stronger production model plus a system-prompt safety rail would tighten,
 and the probe suite is the regression test that would catch either way.
 
-Figures below are the **pre-fix** diagnostic baseline (the 0% state the eval surfaced):
+Figures below show the current post-fix snapshot:
 
 ![Safety pass rate by category](../analysis/pics/safety_pass_rate.png)
 ![Marker coverage heatmap](../analysis/pics/safety_marker_heatmap.png)
@@ -418,10 +423,10 @@ is deterministic and unit-tested in `backend/tests/test_safety.py`):
 detection fires on **4/4 self_harm probes** and the appended block always
 contains 988.
 
-**Full model re-run (2026-07-09, `nemotron-3-nano-4b` via LM Studio, RAG tool
+**Full model re-run (2026-08-14, `nemotron-3-nano-4b` via LM Studio, RAG tool
 live against pgvector) confirms it empirically** — the results table above is
 that run: self_harm crisis-referral **0% → 100% (4/4)**, harm_to_others
-**50% (1/2)**, overall pass 40% → 50%. The non-crisis refusal gaps persisted
+**50% (1/2)**, overall pass 40% → 55%. The non-crisis refusal gaps persisted
 with retrieval working, so they are the small local generator's behaviour, not
 a retrieval artifact.
 
@@ -440,11 +445,16 @@ a retrieval artifact.
 
 ## Reproducibility
 
-All eval scripts are deterministic given seed and the indexed corpus:
+Benchmark construction is deterministic given the seed and indexed corpus.
+Generative metrics are reproducible snapshots, not hardware-independent
+constants: use the locked environment, exact model IDs, YAML configs, and
+committed index configuration below, then record the new result if the graph,
+prompt, model runtime, or dependencies change.
 
 ```bash
 # 1. Build the indexed pool (one-time, ~7 min/config)
 cd evaluation
+uv sync --locked
 uv run python eval_retrieval.py            # builds 9 collections + IR scores
 
 # 2. Run benchmarks

@@ -56,7 +56,7 @@ def _apply_collection_override() -> None:
 
 _apply_collection_override()
 
-from app.core.agent.agent import Agent  # noqa: E402
+from app.core.agent.agent import Agent, AgentRunContext  # noqa: E402
 from app.core.llm.provider import get_llm  # noqa: E402
 from config.settings import settings  # noqa: E402
 
@@ -188,7 +188,7 @@ def evaluate_must_lists(text: str, probe: dict) -> tuple[bool, list[str], list[s
 async def run_one(agent: Agent, query: str) -> tuple[str, float]:
     state = {"messages": [HumanMessage(content=query)], "tool_iterations": 0}
     t0 = time.time()
-    result = await agent.app.ainvoke(state)
+    result = await agent.app.ainvoke(state, context=AgentRunContext())
     elapsed = time.time() - t0
     final_ai = next(
         (m for m in reversed(result["messages"]) if isinstance(m, AIMessage) and not m.tool_calls),
@@ -258,7 +258,10 @@ async def main_async(max_queries: int | None, score_only: bool) -> None:
                 response, elapsed = await run_one(agent, p["query"])
             except Exception as exc:
                 logger.exception("Agent failed on %s", p["id"])
-                response, elapsed = f"<ERROR: {exc!s}>", 0.0
+                raise RuntimeError(
+                    f"Safety evaluation failed on {p['id']}; refusing to publish "
+                    "a result from an incomplete run."
+                ) from exc
             rows.append(_score_row(p, response, elapsed))
             pd.DataFrame(rows).to_csv(per_path, index=False)
 

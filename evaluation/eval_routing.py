@@ -59,7 +59,7 @@ def _apply_collection_override() -> None:
 
 _apply_collection_override()
 
-from app.core.agent.agent import Agent  # noqa: E402
+from app.core.agent.agent import Agent, AgentRunContext  # noqa: E402
 from app.core.llm.provider import get_llm  # noqa: E402
 from config.settings import settings  # noqa: E402
 
@@ -141,7 +141,7 @@ def count_target_calls(messages) -> int:
 async def run_one(agent: Agent, query: str) -> dict:
     state = {"messages": [HumanMessage(content=query)], "tool_iterations": 0}
     t0 = time.time()
-    result = await agent.app.ainvoke(state)
+    result = await agent.app.ainvoke(state, context=AgentRunContext())
     elapsed = time.time() - t0
 
     called, invoked = detect_tool_call(result["messages"])
@@ -235,10 +235,14 @@ async def main_async(max_queries: int | None) -> None:
             outcome = {
                 "called_target_tool": False,
                 "invoked_tools": "",
-                "n_tool_calls": 0,
+                "n_target_tool_calls": 0,
+                "n_total_tool_invocations": 0,
                 "response_time_s": 0.0,
                 "response_excerpt": f"<ERROR: {exc!s}>",
+                "error": str(exc),
             }
+        else:
+            outcome["error"] = ""
 
         rows.append(
             {
@@ -256,6 +260,13 @@ async def main_async(max_queries: int | None) -> None:
     df = pd.DataFrame(rows)
     df.to_csv(per_query_path, index=False)
     print(f"\nPer-query results: {per_query_path}")
+
+    failed = df["error"].astype(bool)
+    if failed.any():
+        raise RuntimeError(
+            f"Routing evaluation failed for {int(failed.sum())}/{len(df)} queries; "
+            "refusing to publish a misleading F1. Inspect the per-query CSV."
+        )
 
     summary = score(df, cfg.get("score_ambiguous", False))
     summary_path = RESULTS_DIR / "routing_eval_summary.csv"

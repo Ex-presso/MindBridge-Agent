@@ -88,7 +88,7 @@ def _apply_collection_override() -> None:
 
 _apply_collection_override()
 
-from app.core.agent.agent import Agent  # noqa: E402
+from app.core.agent.agent import Agent, AgentRunContext  # noqa: E402
 from app.core.llm.provider import get_llm  # noqa: E402
 from config.settings import settings  # noqa: E402
 
@@ -138,7 +138,7 @@ async def run_one(agent: Agent, query: str) -> tuple[str, float]:
     """Returns (response_text, latency_s)."""
     state = {"messages": [HumanMessage(content=query)], "tool_iterations": 0}
     t0 = time.time()
-    result = await agent.app.ainvoke(state)
+    result = await agent.app.ainvoke(state, context=AgentRunContext())
     elapsed = time.time() - t0
     final_ai = next(
         (m for m in reversed(result["messages"]) if isinstance(m, AIMessage) and not m.tool_calls),
@@ -191,7 +191,10 @@ async def generate_responses(cfg: dict, queries: list[dict], output_path: Path) 
             response, elapsed = await run_one(agent, q["query"])
         except Exception as exc:
             logger.exception("Agent failed on %s", q["query_id"])
-            response, elapsed = f"<ERROR: {exc!s}>", 0.0
+            raise RuntimeError(
+                f"Reference evaluation failed on {q['query_id']}; refusing to "
+                "score an incomplete run."
+            ) from exc
         rows.append(
             {
                 "query_id": q["query_id"],

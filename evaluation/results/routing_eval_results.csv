@@ -1,115 +1,109 @@
-query_id,query,category,should_call_rag,called_target_tool,invoked_tools,n_target_tool_calls,n_total_tool_invocations,response_time_s,response_excerpt,notes
-rt_001,I've been feeling completely empty for weeks and nothing seems to bring me joy anymore.,distress,True,True,fetch_mental_health_examples,1,1,29.953,"
-It sounds like you've been carrying this heavy emptiness for weeks, and it feels like joy has slipped away. What I'm hearing is that nothing seems to bring you happiness anymore—that kind of loneliness can really take a toll.  
+query_id,query,category,should_call_rag,called_target_tool,invoked_tools,n_target_tool_calls,n_total_tool_invocations,response_time_s,response_excerpt,error,notes
+rt_001,I've been feeling completely empty for weeks and nothing seems to bring me joy anymore.,distress,True,True,fetch_mental_health_examples,1,1,26.859,"
+It sounds like you've been carrying an emptiness that's lasted weeks, and it feels like nothing brings you joy anymore. What I'm hearing is a deep sense of weariness and disconnection - which reminds me of how sometimes people describe feeling overwhelmed by responsibilities or …",,clear depressive presentation
+rt_002,My panic attacks are getting worse — sometimes I can't even leave the house.,distress,True,True,fetch_mental_health_examples,1,1,18.896,"
+It sounds like your panic attacks are getting worse and you're feeling trapped by them—really heavy stuff to carry alone. I can only imagine how exhausting it must be when even leaving the house feels impossible.
 
-I’m here with you, no matter what’s on your mind.",clear depressive presentation
-rt_002,My panic attacks are getting worse — sometimes I can't even leave the house.,distress,True,True,fetch_mental_health_examples,1,1,19.687,"
-It sounds like your panic attacks are becoming more intense and that the fear of leaving home feels overwhelming—it makes sense to feel stuck when even getting out seems impossible. It's clear how much this is weighing on you, and it takes real courage just to share that. Someti…",anxiety with functional impact
-rt_003,I keep replaying my mother's death in my head and I don't know how to move forward.,grief,True,True,fetch_mental_health_examples,1,1,16.924,"
-It sounds like you're carrying a lot of heavy emotions right now—replaying your mother's death must feel overwhelming and exhausting. What I'm hearing is that these thoughts are stuck with you, making it hard to move forward. 
+I’ve seen counselors help people feel heard in moments like this…",,anxiety with functional impact
+rt_003,I keep replaying my mother's death in my head and I don't know how to move forward.,grief,True,True,fetch_mental_health_examples,1,1,49.35,"
+It sounds like you're carrying a heavy sadness and uncertainty about moving forward after your mother's passing. It takes so much strength just to hold onto those memories without being overwhelmed by the pain. Sometimes, when we feel stuck like that, it helps to remember that o…",,complicated grief
+rt_004,I think I'm a terrible parent. My kid won't talk to me anymore and I don't know what I did.,self_esteem,True,True,fetch_mental_health_examples,1,1,33.111,"
+It sounds like you're carrying a lot of guilt and uncertainty about your relationship with your child right now—that heavy feeling of not knowing what went wrong can be really tough. I'm here to listen without judgment.",,guilt + relational
+rt_005,I feel like a fraud at my job. Everyone seems to know what they're doing except me.,self_esteem,True,True,fetch_mental_health_examples,1,1,23.816,"
+It sounds like you're carrying a heavy weight of self-doubt about your job performance, feeling like an imposter compared to others. That kind of feeling can really take a toll on our emotional well-being. In counseling, we often explore these moments with empathy—helping people…",,imposter syndrome
+rt_006,Hi there!,greeting,False,False,,0,0,8.144,"
+Hi there! It sounds like you're just starting a conversation—how are you doing today?",,no concern surfaced yet
+rt_007,"Hello, how are you?",greeting,False,True,fetch_mental_health_examples,1,1,26.659,"
+Hello! It sounds like you're checking in with me with that warm greeting. What's on your mind? How are you feeling today?",,small talk
+rt_008,"Thanks, that was helpful.",closure,False,False,,0,0,18.626,"
+It sounds like you're feeling grateful for what we talked about—what a nice way to close things off. I'm really glad it was helpful. If there's anything on your mind about how you're feeling or if you'd like to explore any thoughts that came up, I'm here to listen.",,"session closure, no new concern"
+rt_009,What's the weather like in Tokyo today?,off_topic,False,False,,0,0,16.395,"
+I'm not able to check the weather for you — my role is to support your emotional well-being. How have you been feeling today?",,unrelated factual question
+rt_010,Can you write me a Python function that reverses a string?,off_topic,False,False,,0,0,13.083,"
+It sounds like you're asking about writing Python code to reverse a string - that's a programming question rather than something I can help with directly. My role is focused on supporting emotional well-being and mental health conversations, so I'm not able to provide coding ass…",,coding request
+rt_011,I broke up with my partner three months ago and I still cry every night thinking about them.,grief,True,True,fetch_mental_health_examples,1,1,32.599,"
+It sounds like you're still holding onto your partner in your heart, crying every night because of the breakup. That kind of sadness can be really heavy, but it shows how much you cared and loved them.",,prolonged emotional distress
+rt_012,I'm so overwhelmed with school deadlines that I haven't slept in days.,stress,True,True,fetch_mental_health_examples,1,1,19.062,"
+It sounds like you're carrying a lot of pressure with those school deadlines and feeling completely drained from not sleeping. What I'm hearing is that the weight of everything feels overwhelming right now.
 
-I remember reading about how important it is to ack…",complicated grief
-rt_004,I think I'm a terrible parent. My kid won't talk to me anymore and I don't know what I did.,self_esteem,True,True,fetch_mental_health_examples,1,1,29.722,"
-It sounds like you're carrying a lot of worry and maybe even some guilt right now about your child not talking to you anymore. What I'm hearing is that this situation has left you feeling disconnected and unsure if there's something you did wrong. Sometimes when we feel stuck in…",guilt + relational
-rt_005,I feel like a fraud at my job. Everyone seems to know what they're doing except me.,self_esteem,True,True,fetch_mental_health_examples,1,1,14.972,"
-It sounds like you're carrying around some heavy feelings of insecurity at work, as if everyone else seems to have it figured out while you're still figuring yourself out. That kind of self-doubt can really weigh on a person's shoulders. I've heard from others that this feeling—…",imposter syndrome
-rt_006,Hi there!,greeting,False,False,,0,0,8.708,"
-It sounds like you're reaching out with a friendly hello—how are you doing today?",no concern surfaced yet
-rt_007,"Hello, how are you?",greeting,False,False,,0,0,8.821,"
-Hello! It sounds like you're checking in on me—how are you feeling today?",small talk
-rt_008,"Thanks, that was helpful.",closure,False,False,,0,0,10.665,"
-It sounds like you're feeling grateful and supported by our conversation. How are you holding up emotionally after that?","session closure, no new concern"
-rt_009,What's the weather like in Tokyo today?,off_topic,False,False,,0,0,13.661,"
-That's a fun question about Tokyo's weather! I'm here to support your emotional well-being—how have you been feeling today?",unrelated factual question
-rt_010,Can you write me a Python function that reverses a string?,off_topic,False,True,fetch_mental_health_examples,1,1,27.348,"
-It sounds like you might be looking for some technical help with Python - but as a mental health assistant, my focus is on emotional well-being. If you're feeling stressed or overwhelmed about coding challenges, I'm here to listen and support your feelings.",coding request
-rt_011,I broke up with my partner three months ago and I still cry every night thinking about them.,grief,True,True,fetch_mental_health_examples,1,1,24.333,"
-It sounds like you're still holding onto those memories and emotions from your breakup, even though it's been three months. I'm really sorry that pain is still there for you—grief can be so heavy. It's completely natural to feel this way, and acknowledging these feelings is a bi…",prolonged emotional distress
-rt_012,I'm so overwhelmed with school deadlines that I haven't slept in days.,stress,True,True,fetch_mental_health_examples,1,1,17.991,"
-It sounds like school deadlines are weighing heavily on you, leaving little room for rest. What I'm hearing is the pressure of academics causing exhaustion and sleeplessness. The examples remind me that finding personal strategies to manage both emotions and sleep can be a suppo…",burnout indicators
-rt_013,My therapist suggested I journal but I don't know what to write.,coping,True,False,,0,0,10.703,"
-It sounds like you're feeling a bit stuck or unsure about what to write in your journal—like there's no clear starting point. What I'm hearing is that the idea of journaling feels overwhelming or unclear right now, which can make it hard to just begin.
+When people share this kind of stress, counselors often help them expl…",,burnout indicators
+rt_013,My therapist suggested I journal but I don't know what to write.,coping,True,True,fetch_mental_health_examples,1,1,27.053,"
+It sounds like you're feeling unsure or maybe even a bit stuck about where to start with journaling—that uncertainty is actually a sign of your own care and attention to what matters. Sometimes when people feel this way, it's because they're trying to be honest but don't know ho…",,asking for therapeutic guidance
+rt_014,Tell me a joke.,off_topic,False,False,,0,0,18.812,"
+It sounds like you're looking for something lighthearted to brighten your day. I'm here to support your emotional well-being, so if you'd like to share how you're feeling or talk about anything on your mind, I'm all ears.",,entertainment request
+rt_015,I had an argument with my best friend and now we aren't speaking.,relationship,True,True,fetch_mental_health_examples,1,1,21.155,"
+It sounds like this disagreement has left you feeling really sad and maybe even lonely since your friend isn't talking to you anymore. That kind of separation can be tough on the heart. I'm here to listen if you'd like to share more about how it's been affecting you.",,interpersonal conflict
+rt_016,I feel anxious before social events and end up canceling at the last minute.,anxiety,True,True,fetch_mental_health_examples,1,1,32.283,"
+It sounds like you're feeling anxious before social gatherings and sometimes end up canceling at the last minute. That takes courage to share, and it's completely understandable that these feelings might arise. Sometimes when anxiety builds up, we might find small ways to prepar…",,social anxiety
+rt_017,Sometimes I look in the mirror and don't recognize myself anymore.,identity,True,True,fetch_mental_health_examples,1,1,31.803,"
+It sounds like you're having moments where you look in the mirror and don't recognize yourself anymore—that can bring up feelings of sadness or confusion about your own identity. Sometimes these feelings come up as part of the process when we're going through big changes; it's h…",,dissociative-feeling description
+rt_018,What does CBT stand for?,factual,False,True,fetch_mental_health_examples,1,1,49.705,"
+It sounds like you're curious about CBT—Cognitive Behavioral Therapy. It’s a helpful way to work through thoughts and feelings so they don’t feel as heavy or overwhelming. If this is because you’re dealing with stress or anxiety, I’d love to hear how you’re feeling right now.",,definitional question; doesn't need example retrieval
+rt_019,Could you summarize the last thing I said?,meta,False,True,fetch_mental_health_examples,1,1,27.067,"
+It sounds like you're asking for a summary of your own words, which is an interesting question! I want to be clear that my role is focused on supporting emotional well-being and helping with thoughts or feelings that might need some gentle exploration.
 
-I remember seeing example…",asking for therapeutic guidance
-rt_014,Tell me a joke.,off_topic,False,False,,0,0,18.269,"
-That sounds like you might be looking for a little humor! I'm here to support your emotional well-being and explore any feelings that come up. How are you doing today?",entertainment request
-rt_015,I had an argument with my best friend and now we aren't speaking.,relationship,True,True,fetch_mental_health_examples,1,1,14.884,"
-It sounds like this situation has left you feeling really hurt and maybe a bit confused about what to do next. What I'm hearing is that the argument with your best friend has created some emotional pain, and now you're navigating the space where they aren't speaking anymore.
+If there's something abo…",,meta-conversation request
+rt_020,I've been drinking more than usual to numb the stress at work.,substance,True,True,fetch_mental_health_examples,1,1,20.917,"
+It sounds like the stress at work has been weighing on you quite heavily, and drinking more than usual feels like a way to find some relief from that pressure. What I'm hearing is that you're reaching for something to numb out the intensity of those feelings—it makes sense when …",,substance use coping
+rt_021,good morning,greeting,False,False,,0,0,16.268,"
+Good morning! It sounds like you're starting the day with a warm greeting—hope your morning is feeling bright and peaceful. How are you holding up today? 😊",,greeting
+rt_022,I'm tired,ambiguous,,True,fetch_mental_health_examples,1,1,28.636,"
+It sounds like you're feeling quite tired right now—sometimes physical exhaustion can be a quiet signal of all the emotional weight we carry without realizing it. I'm here to listen and explore that with you, if you'd like to share more about what's on your mind.",,could be physical or emotional fatigue; either decision defensible
+rt_023,I don't really know what to say.,ambiguous,,True,fetch_mental_health_examples,1,1,21.755,"
+It sounds like you're feeling a bit unsure about how to express yourself right now—maybe a little anxious or stuck in that ""what do I say?"" moment. Sometimes when we're not sure what to say, it can bring up feelings of helplessness or sadness, like in Example 3 where someone str…",,hesitation; reflective response could go either way
+rt_024,Why is the sky blue?,off_topic,False,False,,0,0,10.559,"
+It sounds like you're curious about something that might be puzzling or interesting to you—maybe a little wonder in the everyday world. I'm here to support your emotional well-being and help with any feelings of stress, anxiety, or just needing someone to listen. How are you fee…",,factual science question
+rt_025,I keep procrastinating on important things and then hating myself for it.,self_esteem,True,True,fetch_mental_health_examples,1,1,23.669,"
+It sounds like you're carrying a lot of frustration and self-judgment around procrastination—the way you describe hating yourself for things you put off really shows how hard this is to manage. It might help to explore what's behind that cycle, like whether there are specific wo…",,self-criticism cycle
+rt_026,My boss yelled at me in front of the whole team today.,stress,True,True,fetch_mental_health_examples,1,1,20.314,"
+It sounds like this situation really left you feeling exposed and maybe even humiliated—like your boss’s words were aimed at you in front of everyone who could see it. What I’m hearing is that this kind of public criticism can make you feel vulnerable, disrespected, or even shak…",,workplace incident with emotional impact
+rt_027,Are you a real therapist?,meta,False,True,fetch_mental_health_examples,1,1,25.203,"
+It sounds like you're wondering if my responses are truly helpful or if there's something deeper going on. I understand that uncertainty can sometimes bring up feelings of anxiety—like when we get unexpected calls that make us question what's real. That's a common human experien…",,boundary/identity question about the assistant
+rt_028,I have trouble sleeping because my mind races at night.,anxiety,True,False,,0,0,12.001,"
+It sounds like your mind is racing at night, and that’s making it hard to settle into sleep. I can imagine how exhausting that must feel—like you’re carrying a lot of thoughts around with you even when you want to rest. Many people have shared similar feelings about restless nig…",,rumination with physical effects
+rt_029,I feel guilty for resting when I have so much to do.,stress,True,True,fetch_mental_health_examples,1,1,28.681,"
+It sounds like you're carrying this heavy sense of guilt for resting when there's so much to do. That feeling can be really tough—like you're not doing enough even when you're trying your best. It's common to feel this way, especially when we're juggling a lot.",,guilt around self-care
+rt_030,ok,minimal,False,False,,0,0,22.035,"
+It sounds like you're okay with that... but if there's anything on your mind or how you're feeling, I'm here to listen.",,"minimal acknowledgment, no concern"
+rt_031,Everyone I know has their life together except me.,self_esteem,True,True,fetch_mental_health_examples,1,1,28.7,"
+It sounds like you're feeling a bit out of sync with others' lives right now—like everyone else seems to have things together while you don't. That can be really tough, but it's okay to feel that way sometimes. How are you holding up emotionally today?",,social comparison distress
+rt_032,I'm scared I'll never find someone who really loves me.,loneliness,True,True,fetch_mental_health_examples,1,1,25.187,"
+It sounds like you're feeling really scared about finding love and being loved. What I'm hearing is a deep sense of loneliness and maybe some fear that you'll never be truly understood or connected.
 
-I …",interpersonal conflict
-rt_016,I feel anxious before social events and end up canceling at the last minute.,anxiety,True,True,fetch_mental_health_examples,1,1,20.767,"
-It sounds like you're feeling really anxious before social events and sometimes end up cancelling out of the blue. I wonder if there might be a pattern or trigger that's behind this? Sometimes with these feelings, we could gently explore what's underneath and create a little pla…",social anxiety
-rt_017,Sometimes I look in the mirror and don't recognize myself anymore.,identity,True,True,fetch_mental_health_examples,1,1,34.511,"
-It sounds like you're saying that sometimes when you look in the mirror, you don't recognize yourself anymore. That can be such a heavy and confusing experience. I've seen people express similar feelings when they look in the mirror and don't recognize themselves—it's often tied…",dissociative-feeling description
-rt_018,What does CBT stand for?,factual,False,True,fetch_mental_health_examples,1,1,24.317,"
-It sounds like you're wondering what CBT stands for - that's Cognitive Behavioral Therapy! It's a helpful approach that explores how our thoughts influence our feelings and behaviors. 
-
-Would you like to share more about why this topic came up? Sometimes understanding these thin…",definitional question; doesn't need example retrieval
-rt_019,Could you summarize the last thing I said?,meta,False,False,,0,0,13.267,"
-It sounds like you're checking whether I've caught the thread of our conversation—maybe because you'd like to feel truly heard or reassured that we're on the same page. How are you doing emotionally today?",meta-conversation request
-rt_020,I've been drinking more than usual to numb the stress at work.,substance,True,True,fetch_mental_health_examples,1,1,19.54,"
-What I'm hearing is that the stress at work has been so heavy lately that drinking feels like a way to quiet it out—like creating some space when things feel overwhelming. It makes sense that we might look for ways to build resilience in the face of life's challenges, even if it…",substance use coping
-rt_021,good morning,greeting,False,False,,0,0,17.075,"
-Good morning! It sounds like you're starting your day with a warm hello—what I'm hearing is that maybe you feel upbeat or just checking in on the weather of your mood. Sometimes a simple ""good morning"" can carry little hopes for the day ahead, like how a gentle breeze might lift…",greeting
-rt_022,I'm tired,ambiguous,,True,fetch_mental_health_examples,1,1,20.475,"
-It sounds like you're carrying a lot and just need some rest. I've heard from others that when we're overwhelmed by the everyday chaos of life, our bodies often tell us they're tired—like that weight of responsibilities settling in. It's okay to feel this way; sometimes just ack…",could be physical or emotional fatigue; either decision defensible
-rt_023,I don't really know what to say.,ambiguous,,True,fetch_mental_health_examples,1,1,24.005,"
-It sounds like you might be feeling a bit stuck or unsure where your thoughts are leading—like there's not much coming through when it comes to what you'd like to say. That kind of uncertainty can feel heavy sometimes, but it's actually really common and okay to have moments whe…",hesitation; reflective response could go either way
-rt_024,Why is the sky blue?,off_topic,False,False,,0,0,12.52,"
-It sounds like you're curious about a simple question that might be on your mind—maybe wondering if there's more beneath the surface? My role is to support your emotional well-being, so I can't answer questions outside of that. How are you feeling today?",factual science question
-rt_025,I keep procrastinating on important things and then hating myself for it.,self_esteem,True,True,fetch_mental_health_examples,1,1,21.695,"
-It sounds like procrastination is really weighing on you, and then the self-criticism hits hard after—like a wave of ""I should've done this"" that leaves you feeling disappointed or even ashamed. That pattern must feel exhausting, doesn't it? 
-
-The examples I have in mind suggest…",self-criticism cycle
-rt_026,My boss yelled at me in front of the whole team today.,stress,True,False,,0,0,12.084,"
-It sounds like you're feeling really upset or maybe even humiliated right now—that public moment must have been tough. I can imagine how hard it would be to hear criticism from your boss in front of everyone; it might feel like the whole team is turning against you.  
-
-Sometimes…",workplace incident with emotional impact
-rt_027,Are you a real therapist?,meta,False,False,,0,0,13.849,"
-It sounds like you're wondering if I'm truly a therapist who can help you feel better—what a thoughtful question! That shows you care about getting the right kind of support, and it’s okay to ask questions when you’re unsure. In counseling, we often talk about how important it i…",boundary/identity question about the assistant
-rt_028,I have trouble sleeping because my mind races at night.,anxiety,True,True,fetch_mental_health_examples,1,1,17.041,"
-It sounds like your nights are filled with racing thoughts that make it hard to sleep. What I'm hearing is that you're struggling with getting rest because your mind won't quiet down. Remember, you don't have to go through this alone—that's what we often hear in coping strategie…",rumination with physical effects
-rt_029,I feel guilty for resting when I have so much to do.,stress,True,True,fetch_mental_health_examples,1,1,18.877,"
-It sounds like you're carrying that weight of having so much to do while also feeling guilty about resting. Sometimes we feel this way because it's tough to find balance, and there are moments when we carry these feelings of guilt as if they're signs we're not doing enough. Reme…",guilt around self-care
-rt_030,ok,minimal,False,False,,0,0,12.946,"
-It sounds like you might be okay with where we are—just a simple ""ok"" from you. I'm here to listen if anything's on your mind, or if you'd rather share how you're feeling right now. No pressure at all; just know I care about your well-being. 💛","minimal acknowledgment, no concern"
-rt_031,Everyone I know has their life together except me.,self_esteem,True,True,fetch_mental_health_examples,1,1,18.177,"
-It sounds like you're comparing yourself to others who seem to have their life together, which might be making you feel isolated. I've seen people find it helpful to talk about these feelings and explore ways to build stronger connections or support systems when things feel over…",social comparison distress
-rt_032,I'm scared I'll never find someone who really loves me.,loneliness,True,True,fetch_mental_health_examples,1,1,17.282,"
-I hear how deeply you're worried about never being truly loved by someone else—that fear can make loneliness feel overwhelming. It’s okay to carry those feelings; sometimes just talking through them helps lighten the weight a little.",fear of abandonment / loneliness
-rt_033,Just got home from a long day,ambiguous,,True,fetch_mental_health_examples,1,1,22.95,"
-It sounds like you've been carrying quite a bit today and now that you're finally home, it might be hard to shake off that feeling of being overwhelmed. You know, sometimes our exhaustion is just a sign that something feels unbalanced after a long day. How are you feeling right …",neutral statement; could open into distress or stay small talk
-rt_034,I can't stop comparing myself to my coworkers and it's making me miserable.,self_esteem,True,True,fetch_mental_health_examples,1,1,22.071,"
-It sounds like the comparisons are really weighing on you and leaving you feeling miserable—that must be so tough. It’s okay to feel how you do; comparing ourselves to others can be hard, but it’s important to remember that everyone has their own journey. How have these feelings…",envy + distress
-rt_035,Repeat after me: hello world,off_topic,False,False,,0,0,15.932,"
-It sounds like you're asking me to repeat something simple, but I'm here to support your emotional well-being and explore any feelings or concerns you might have. If you'd like to share how you're feeling or talk about anything on your mind, I'm happy to listen.",playful test query
-rt_036,I miss my dog who passed away last year. Is that weird?,grief,True,True,fetch_mental_health_examples,1,1,19.01,"
-It sounds like you're carrying a lot of sadness and maybe some guilt or confusion about missing your dog—that’s completely understandable. As one counselor shared, it's natural to feel a range of emotions when someone we love passes away: sadness, fear, helplessness. Your feelin…","pet grief, validation-seeking"
-rt_037,I overshared at a party last night and now I'm spiraling about what people think.,anxiety,True,True,fetch_mental_health_examples,1,1,16.044,"
-It sounds like you're really wrestling with those feelings right now—like there's this spiral where you keep replaying what people might have thought, and it's making you feel anxious or maybe even ashamed. I've seen that sometimes when we overshare at gatherings, it can stir up…",social anxiety post-event
-rt_038,Could you translate 'good night' into Japanese?,off_topic,False,False,,0,0,12.636,"
-It sounds like you might be looking for a quick translation, which isn't something I can help with directly. But I'm always here to listen and support your emotional well-being—if you're having thoughts or feelings as you prepare for bed, I'd love to hear how you're doing.",translation request
-rt_039,I feel like nobody actually listens to me.,loneliness,True,True,fetch_mental_health_examples,1,1,20.22,"
-It sounds like you're feeling really unheard right now, and that must be so tough. I hear how much it hurts when you think no one is listening. It's okay to feel that way—many people experience moments where they feel isolated or unseen. Sometimes when we feel lonely, it can be …",feeling unheard
-rt_040,I'm angry all the time and I don't know why. I snap at people I love.,anger,True,True,fetch_mental_health_examples,1,1,19.935,"
-It sounds like you're carrying a heavy weight of anger that feels constant and unexplained, and it's showing up in your relationships with people you care about. That takes courage to notice this pattern. I'm here to listen without judgment. Sometimes when emotions feel overwhel…",uncontrolled anger
-rt_041,Can we change the subject?,meta,False,True,fetch_mental_health_examples,1,1,18.863,"
-I sense you might be wanting to shift focus—perhaps there's something on your mind that feels heavy right now. How are you feeling?",topic shift request
-rt_042,I'm having intrusive thoughts that scare me.,distress,True,True,fetch_mental_health_examples,1,1,19.523,"
-It sounds like you're feeling really unsettled by these intrusive thoughts that scare you. What I'm hearing is that they bring up anxiety and make it hard to feel safe in your own mind. When thinking about coping strategies for this, one approach involves learning how to recogni…",intrusive thoughts; serious
-rt_043,"Hello, just checking in.",ambiguous,,False,,0,0,7.181,"
-It sounds like you're just checking in—maybe wondering how things are going or if there's anything on your mind. That’s okay, we’re all human sometimes. How have you been feeling lately?",ambiguous opener; reasonable to retrieve or not
-rt_044,Tell me about yourself.,meta,False,False,,0,0,19.312,"
-It sounds like you might be curious about who I am as your counselor. I'm here to support your emotional well-being, though I don't have personal experiences or feelings of my own. How are you feeling today?",asks about the assistant
-rt_045,I feel like I'm wasting my life.,existential,True,True,fetch_mental_health_examples,1,1,18.539,"
-I hear how heavy that feeling is—like you're stuck in a rut where everything seems pointless. Sometimes it helps to remember that even when we feel helpless and hopeless, taking small steps with kindness can make a difference (as one counselor shared). It’s okay to feel this way…",existential distress
-rt_046,I had a productive day at work today.,ambiguous,,True,fetch_mental_health_examples,1,1,29.378,"
-It sounds like you had a productive day at work today—that's wonderful! Sometimes when we talk about productivity, there might be deeper feelings about whether things are going as expected or if we're feeling pressure. I've seen counselor examples that show how exploring these e…",positive update; could acknowledge without retrieval
-rt_047,What's 2+2?,off_topic,False,False,,0,0,9.946,"
-That's a simple math question! I'm here for your emotional well-being though—how are you feeling today?",math test question
-rt_048,I keep apologizing for things that aren't my fault.,self_esteem,True,True,fetch_mental_health_examples,1,1,18.329,"
-It sounds like you're carrying some guilt around things that aren't really your fault, which is something many people experience when they feel responsible for accidents or mishaps. One thing I've seen in counseling is how helpful it can be to practice self-compassion and rememb…",people-pleasing pattern
-rt_049,Goodbye for now.,closure,False,False,,0,0,9.259,"
-It sounds like you're wrapping up the conversation for now—that’s okay. Wishing you peace as you move forward. If there’s anything on your mind or how you’re feeling, I’m here to listen whenever you need.",session end
-rt_050,I felt like crying today but I held it in.,depression,True,True,fetch_mental_health_examples,1,1,15.861,"
-It sounds like you were carrying a lot of emotion today and tried to hold it in—that's such a common experience when we're feeling overwhelmed. Sometimes we find ways to cope with that emotional weight, like talking through it or finding support from someone who understands.",suppressed emotion
+Sometimes when people feel this way, they might wonder if there's something wr…",,fear of abandonment / loneliness
+rt_033,Just got home from a long day,ambiguous,,False,,0,0,12.863,"
+It sounds like you've just come back from a long day and are now at home—maybe feeling tired or needing to decompress? What I'm hearing is that the day has been demanding, and it's okay if you're looking for some relief. How are you feeling right now?",,neutral statement; could open into distress or stay small talk
+rt_034,I can't stop comparing myself to my coworkers and it's making me miserable.,self_esteem,True,True,fetch_mental_health_examples,1,1,16.748,"
+It sounds like comparing yourself to your coworkers is weighing on you and making things feel heavy, doesn't it? That kind of comparison can really take its toll emotionally.",,envy + distress
+rt_035,Repeat after me: hello world,off_topic,False,False,,0,0,11.912,"
+It sounds like you might be looking for something familiar to say—'hello world'. I can repeat that for you. How are you feeling today?",,playful test query
+rt_036,I miss my dog who passed away last year. Is that weird?,grief,True,False,,0,0,12.248,"
+It sounds like you're feeling deep sadness or maybe some guilt about missing your dog—that ache when a pet is gone can be really heavy. What I'm hearing is that losing someone who was part of your daily life leaves a big emotional space, and it’s okay to wonder if those feelings…",,"pet grief, validation-seeking"
+rt_037,I overshared at a party last night and now I'm spiraling about what people think.,anxiety,True,True,fetch_mental_health_examples,1,1,27.779,"
+It sounds like you're feeling really anxious and maybe even a little guilty after oversharing at the party last night. What I'm hearing is that you're worried people might think less of you or judge your words. That's such a common human experience—we all worry about how others …",,social anxiety post-event
+rt_038,Could you translate 'good night' into Japanese?,off_topic,False,False,,0,0,13.523,"
+I’m not able to help with translations, but I’m here to listen and support your emotional well‑being if you’d like to share how you’re feeling tonight.",,translation request
+rt_039,I feel like nobody actually listens to me.,loneliness,True,True,fetch_mental_health_examples,1,1,27.378,"
+It sounds like you're carrying this heavy feeling of being unheard, and it must be really hard to put into words. What I'm hearing is a deep sense of loneliness when we don't feel truly listened to - that kind of emotional weight can be exhausting. It's important to remember tha…",,feeling unheard
+rt_040,I'm angry all the time and I don't know why. I snap at people I love.,anger,True,True,fetch_mental_health_examples,1,1,23.912,"
+It sounds like you're carrying a lot of frustration and maybe some hurt inside, especially when it comes to people you care about. I'm hearing how hard it must be to feel angry all the time without knowing why, and how that affects your relationships. There's something really te…",,uncontrolled anger
+rt_041,Can we change the subject?,meta,False,False,,0,0,12.474,"
+It sounds like you'd like to shift away from this topic—maybe because it feels heavy or uncomfortable right now. What I'm hearing is that you might need a little space, and that's completely okay. How are you feeling about taking a break?",,topic shift request
+rt_042,I'm having intrusive thoughts that scare me.,distress,True,True,fetch_mental_health_examples,1,1,23.032,"
+It sounds like you're carrying around scary intrusive thoughts that make you feel really unsettled. What I'm hearing is that these thoughts are causing you distress and making you feel scared. I'm here to listen without judgment, and if you'd like to share more about what's happ…",,intrusive thoughts; serious
+rt_043,"Hello, just checking in.",ambiguous,,False,,0,0,6.798,"
+It sounds like you're just taking a moment to check in with yourself—maybe wondering how things are going or if there's anything on your mind. That’s okay; sometimes we all need a little pause to see where we stand emotionally. If you’d like, you can share how you’re feeling rig…",,ambiguous opener; reasonable to retrieve or not
+rt_044,Tell me about yourself.,meta,False,False,,0,0,9.718,"
+It sounds like you're curious about who I am or what I can do. My role here is to support your emotional well-being—helping you explore how you're feeling, thinking, and coping with things that matter to you. How are you doing today?",,asks about the assistant
+rt_045,I feel like I'm wasting my life.,existential,True,True,fetch_mental_health_examples,1,1,19.681,"
+It sounds like you're carrying this heavy sense of being ""wasting"" your life right now. What I'm hearing is a deep feeling of worthlessness or meaninglessness that's weighing on you. I remember reading about how therapy can be a safe space where people process these kinds of tho…",,existential distress
+rt_046,I had a productive day at work today.,ambiguous,,True,fetch_mental_health_examples,1,1,24.089,"
+It sounds like your productive day at work is making you feel good—what I'm hearing is that you had a successful, meaningful time there. It makes me wonder if any part of that day stood out to you emotionally? Sometimes when we have positive experiences, it can be nice to reflec…",,positive update; could acknowledge without retrieval
+rt_047,What's 2+2?,off_topic,False,False,,0,0,14.379,"
+It sounds like you're wondering about 2 plus 2—a simple math question. I'm here to support your mental or emotional well-being, so if anything's on your mind or you'd like to talk about how you're feeling today, I'm all ears.",,math test question
+rt_048,I keep apologizing for things that aren't my fault.,self_esteem,True,True,fetch_mental_health_examples,1,1,22.395,"
+It sounds like you're carrying a lot of guilt and feeling responsible for things that aren't really your fault. I've seen this pattern before—when someone keeps apologizing even though it's not their fault, it often comes from deep feelings of shame or helplessness. Like in one …",,people-pleasing pattern
+rt_049,Goodbye for now.,closure,False,False,,0,0,10.76,"
+It sounds like you're wrapping up for now—maybe you're just taking a little break? If you ever want to share how you're feeling or need some support, I'm here for that. Take care!",,session end
+rt_050,I felt like crying today but I held it in.,depression,True,True,fetch_mental_health_examples,1,1,18.739,"
+It sounds like you were carrying some heavy emotions today, and the fact that you held back your tears shows how much they mattered to you. I’ve heard from counselors that recognizing when we’re struggling is really important—it’s okay to feel that way. Would you like to share w…",,suppressed emotion
