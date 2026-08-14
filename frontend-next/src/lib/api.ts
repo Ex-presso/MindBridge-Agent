@@ -12,6 +12,23 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+function apiErrorMessage(body: unknown, status: number): string {
+  if (!body || typeof body !== "object" || !("detail" in body)) {
+    return `HTTP ${status}`;
+  }
+
+  const detail = body.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((item) => {
+      if (!item || typeof item !== "object" || !("msg" in item)) return [];
+      return typeof item.msg === "string" ? [item.msg] : [];
+    });
+    if (messages.length) return messages.join("; ");
+  }
+  return `HTTP ${status}`;
+}
+
 function assertExpectedUser(expectedUserId?: string): void {
   if (expectedUserId && useAuthStore.getState().user?.id !== expectedUserId) {
     throw new Error("Authentication session changed.");
@@ -67,7 +84,11 @@ async function request<T>(
     if (refreshed) return request<T>(path, options, false, expectedUserId);
     if (!expectedUserId || useAuthStore.getState().user?.id === expectedUserId) {
       useAuthStore.getState().clearAuth();
-      if (typeof window !== "undefined") window.location.href = "/login";
+      if (typeof window !== "undefined") {
+        // A full reload clears all client auth state after refresh failure.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = "/login";
+      }
     }
     throw new Error("Unauthorized");
   }
@@ -79,7 +100,7 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`);
+    throw new Error(apiErrorMessage(body, res.status));
   }
 
   const body = await res.json();

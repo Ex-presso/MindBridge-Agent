@@ -13,7 +13,7 @@ export function AuthInitializer() {
     }
     // Try to restore session via refresh token cookie
     api.auth.tryRefresh().finally(() => setInitialized());
-  }, []); // run once on mount
+  }, [accessToken, setInitialized]);
 
   return null;
 }

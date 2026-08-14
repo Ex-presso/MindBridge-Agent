@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, KeyboardEvent } from "react";
+import { useRef, useState, KeyboardEvent } from "react";
 import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,15 +19,12 @@ interface Props {
 
 export function ChatInput({ onSend, isLoading, disabled, models = [] }: Props) {
   const [text, setText] = useState("");
-  const [selectedModel, setSelectedModel] = useState<ModelOption>(models[0] ?? { id: "", name: "No model", provider: "" });
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const selectedModel = models.find((model) => model.id === selectedModelId)
+    ?? models[0]
+    ?? { id: "", name: "No model", provider: "" };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const MAX = 4000;
-
-  useEffect(() => {
-    if (models.length > 0 && !models.find(m => m.id === selectedModel.id)) {
-      setSelectedModel(models[0]);
-    }
-  }, [models]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {
     const trimmed = text.trim();
@@ -61,8 +58,7 @@ export function ChatInput({ onSend, isLoading, disabled, models = [] }: Props) {
           <select
             value={selectedModel.id}
             onChange={(e) => {
-              const m = models.find((m) => m.id === e.target.value);
-              if (m) setSelectedModel(m);
+              setSelectedModelId(e.target.value);
             }}
             className="text-xs border border-[--border] rounded px-2 py-1 bg-[--background] text-[--muted-foreground] cursor-pointer"
           >

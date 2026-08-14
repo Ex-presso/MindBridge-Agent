@@ -68,7 +68,6 @@ export function useChat({
         const newConvId = res.headers.get("X-Conversation-Id");
         if (newConvId && !currentConvId.current) {
           currentConvId.current = newConvId;
-          onNewConversation?.(newConvId);
         }
 
         let accumulated = "";
@@ -87,6 +86,7 @@ export function useChat({
             m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
           ),
         );
+        if (newConvId) onNewConversation?.(newConvId);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong.");
         setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
