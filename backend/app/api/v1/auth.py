@@ -37,6 +37,9 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 async def register(request: Request, body: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
     access, refresh = await auth_service.register(db, email=body.email, password=body.password, display_name=body.display_name)
+    # The access token is usable as soon as this response reaches the client.
+    # Commit first so an immediate authenticated request can see the new user.
+    await db.commit()
     _set_refresh_cookie(response, refresh)
     return TokenResponse(access_token=access)
 

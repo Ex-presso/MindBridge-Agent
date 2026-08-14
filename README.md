@@ -7,7 +7,7 @@ A mental health support chatbot built with **FastAPI**, **LangGraph**, and **RAG
 - **LangGraph agent with conditional RAG**: the LLM decides per turn whether to call the retrieval tool (tool-routing F1 = 0.893 on 45 scored hand-labeled cases), with a bounded tool-call loop.
 - **Multi-provider, bring-your-own-key**: OpenAI, Anthropic, Google Gemini, plus any OpenAI- or Anthropic-compatible endpoint (Ollama, LM Studio). Per-user keys are Fernet-encrypted at rest.
 - **Server-side conversation memory**: a LangGraph PostgreSQL checkpointer keyed by conversation, so clients send only the new message.
-- **Opt-in long-term memory**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe Selection, grounded Extraction, and a leased idempotent Episode writer.
+- **Opt-in long-term memory**: user-scoped LangGraph Store, transparent privacy controls, checkpoint-safe Selection, grounded Extraction, and a leased idempotent Episode writer. A live 17-case API benchmark records 4/6 memory-on recalls, 0/6 memory-off recalls, and 5/5 privacy/selection gates with a local 4B model.
 - **Real token-level SSE streaming** with optimistic UI updates.
 - **JWT auth**: short-lived access tokens, httpOnly refresh cookies, and bcrypt hashing.
 - **Five-layer evaluation framework** with seed-frozen benchmarks and versioned local-model results.
@@ -100,12 +100,14 @@ Each layer isolates one variable in the stack. Benchmarks are seed-frozen JSON i
 | Reference-based | BERTScore (baseline-rescaled) vs MentalChat16K hold-out | F1 = 0.139, cosine = 0.637 (n = 99) |
 | LLM-as-judge | Empathy/safety across 6 prompt × RAG conditions, Wilcoxon + Holm | CBT < Baseline (p = 0.004); Rogerian ≈ Baseline |
 | Safety probes | Crisis-referral / refusal on 20 high-risk probes | self-harm crisis-referral **0% → 100%**: probe suite surfaced the gap, an in-graph crisis node closed it (re-run confirmed) |
+| Memory acceptance | Live API-level on/off recall plus consent, clear, isolation, crisis, and relevance gates | Recall 4/6 on vs 0/6 off; gates 5/5 (17 cases, local 4B model) |
 
 Two design choices are worth noting. First, the **judge is a different model family than the generator**, because same-model self-judging previously produced ceiling scores with zero significant differences. Second, the safety layer is **diagnostic by design**: it surfaced that the empathy-optimized Rogerian prompt reflected feelings without crisis routing, which an in-graph crisis-routing node then closed (self-harm crisis-referral from 0% to 100% on re-run).
 
 ```bash
 cd evaluation && uv sync --locked
 uv run python eval_routing.py --max-queries 3   # smoke test one layer
+uv run python eval_memory.py --max-recall 1 --skip-gates  # live memory smoke
 python ../analysis/analyze.py                   # regenerate all figures
 ```
 
@@ -114,7 +116,7 @@ python ../analysis/analyze.py                   # regenerate all figures
 ```
 backend/        FastAPI app: LangGraph agent, RAG, auth, async SQLAlchemy
 frontend-next/  Next.js 16 App Router chat UI
-evaluation/     Five eval layers: scripts, YAML configs, frozen benchmarks, results
+evaluation/     Five eval layers plus live memory acceptance: configs, benchmarks, results
 analysis/       Figure/table generation from eval results
 docs/           EVALUATION.md · MEMORY.md
 legacy/         Retired Gradio frontend

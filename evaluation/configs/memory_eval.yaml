@@ -1,0 +1,10 @@
+# Live API-level evaluation for cross-conversation episodic memory.
+backend_url: "http://localhost:8080/api/v1"
+provider: "openai_compatible"
+model: "nvidia/nemotron-3-nano-4b"
+provider_base_url: "http://host.docker.internal:1234/v1"
+provider_api_key: "lm-studio"
+embedding_model: "text-embedding-mxbai-embed-large-v1"
+embedding_dims: 1024
+memory_wait_timeout_s: 90
+poll_interval_s: 1

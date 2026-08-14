@@ -402,13 +402,14 @@ fail-closed. They must be re-derived with grounded `claims` and a
    deterministic crisis/diagnosis/instruction filters, and sanitized failures.
 6. **Complete:** enqueue completed turns and add the leased worker, bounded
    retries, relational source reload, and idempotent Episode upsert/deletion.
-7. **Next:** finish three production smoke paths with OrbStack. Local chat-schema
-   compatibility and the 1,024-dimensional embedding endpoint have passed
-   preflight; the remaining proof is the API-level write/recall/privacy flow.
-8. Freeze a 12–20 case multi-session memory on/off evaluation covering recall,
-   evidence accuracy, irrelevant-memory rejection, user isolation, deletion,
-   crisis filtering, prompt injection, latency, and token cost.
-9. Use those results to implement only the minimum explicit semantic facts and
+7. **Complete:** accept the production paths in OrbStack through the public API
+   and browser: write/recall, consent-off, clear, crisis exclusion, account
+   deletion, and Store cleanup.
+8. **Complete:** freeze and run a 17-case multi-session memory on/off evaluation
+   covering grounded recall, irrelevant-memory rejection, user isolation,
+   consent, clear, and crisis filtering. The committed local-model snapshot is
+   4/6 memory-on recall, 0/6 memory-off recall, and 5/5 gates.
+9. **Next:** use those results to implement only the minimum explicit semantic facts and
    conflict-aware Consolidation needed for a complete three-layer claim.
 10. Implement the constrained C′ `save_memory` hook last; evaluation determines
     its narrow scope and priority, not whether an unimplemented system may be
@@ -416,13 +417,14 @@ fail-closed. They must be re-derived with grounded `claims` and a
 
 ## Next delivery plan
 
-1. **Production smoke:** verify `chat → outbox → worker → Store → later recall`,
-   consent-off no-write behavior, and crisis-triggered physical deletion. This
-   is intentionally three scenarios rather than another broad unit-test matrix.
-2. **Frozen memory evaluation:** compare memory off/on with stable fixtures and
-   publish recall, rejection, evidence, isolation/deletion, latency, and token
-   results in the repository.
-3. **Minimal semantic layer:** store only explicit preferences, goals, helpful
+1. **Complete — production smoke:** `chat → outbox → worker → Store → later
+   recall`, consent-off, clear, crisis exclusion, and account deletion were
+   accepted through the running OrbStack stack.
+2. **Complete — frozen memory evaluation:** the repository now contains the
+   17-case dataset, live API runner, exact local-model configuration, row-level
+   results, and summary metrics. The two retained misses distinguish response
+   omission from bounded structured-Extraction failure.
+3. **Next — minimal semantic layer:** store only explicit preferences, goals, helpful
    strategies, and important people with relational evidence. Never infer a
    diagnosis. Deduplicate equivalent facts and supersede conflicts.
 4. **Deterministic Consolidation:** trigger by an application threshold or
@@ -487,12 +489,16 @@ chat → transactional outbox → leased worker → Episode Store, then a second
 conversation recalled both the interview topic and preferred response style.
 The UI observed Store counts 0 → 1 → 2 → 0 across writes and clear-and-disable;
 account deletion returned to login and the user row was physically absent.
-This is a live acceptance trace, not the still-planned frozen memory A/B suite.
+The frozen live API evaluation now extends that trace with six memory-on/off
+pairs and five privacy/Selection gates. With
+`nvidia/nemotron-3-nano-4b` and `text-embedding-mxbai-embed-large-v1`, it
+recorded 4/6 memory-on recalls, 0/6 memory-off recalls, 5/6 grounded writes,
+and 5/5 gates. The committed row-level evidence retains one response omission
+and one bounded structured-Extraction failure; see `docs/EVALUATION.md`.
 
 Production writes occur only when both global and user consent are enabled and
-all fresh relational gates pass. Remaining work is conflict-aware
-Consolidation, optional explicit-memory tooling, and the frozen multi-session
-memory evaluation; none is part of this writer delivery.
+all fresh relational gates pass. Remaining work is the minimal semantic layer,
+conflict-aware Consolidation, and optional explicit-memory tooling.
 
 `README.md` and this file are the tracked, authoritative documentation in the
 handoff commits. `docs/develop.md`, `docs/system_arch.md`, and

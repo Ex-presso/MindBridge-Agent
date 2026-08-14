@@ -8,7 +8,8 @@ local reproduction without external API keys.
 > All evaluation runs use **local LLMs via LM Studio** with a fixed
 > seed for benchmark curation. Generator: `nvidia/nemotron-3-nano-4b`.
 > Judge (where applicable): `qwen3.5-27b-claude-4.6-opus-distilled-mlx@4bit`.
-> Embeddings: `Qwen/Qwen3-Embedding-0.6B`. Index pool: first 3000 examples
+> RAG embeddings: `Qwen/Qwen3-Embedding-0.6B`. The memory acceptance run
+> uses `text-embedding-mxbai-embed-large-v1`. Index pool: first 3000 examples
 > from MentalChat16K.
 
 ## Why a layered framework?
@@ -443,6 +444,70 @@ a retrieval artifact.
 
 ---
 
+## Product acceptance: cross-session memory
+
+**Question.** Does the opt-in Episode pipeline improve recall across separate
+conversations while preserving consent, deletion, isolation, crisis, and
+relevance boundaries through the public API?
+
+### Design
+
+- Six fictional Episode scenarios run twice with disposable users: once with
+  memory off and once with memory on. Every probe starts a new conversation.
+- Five additional gates cover consent-off Selection, physical clear, exact
+  user namespace isolation, deterministic crisis exclusion, and rejection of
+  semantically irrelevant stored memory.
+- The runner uses the real FastAPI routes, transactional outbox, leased worker,
+  LangGraph Store, vector Selection, and account-deletion cleanup. It is a live
+  product evaluation, not another pytest suite.
+- Expected facts must appear both in the stored Episode and in the memory-on
+  response. Memory-off responses must not contain the canary facts and must
+  leave the Store empty.
+
+### Results
+
+Snapshot: 2026-08-14, `nvidia/nemotron-3-nano-4b` for chat and Extraction,
+`text-embedding-mxbai-embed-large-v1` for Store indexing, both served by LM
+Studio. The stack ran in OrbStack with PostgreSQL/pgvector. Results are in
+`evaluation/results/memory_eval_{results,summary}.csv`.
+
+The first smoke run also exposed a post-registration race: the API returned an
+access token before the new user commit was visible to an immediate
+authenticated request. Registration now commits before returning the token;
+the final benchmark ran through the repaired public flow.
+
+| Metric | Result |
+|--------|--------|
+| Memory-on cross-session recall | **4/6 (66.7%)** |
+| Memory-off recall | **0/6 (0%)** |
+| Recall lift | **+66.7 percentage points** |
+| Grounded Episode storage | **5/6 (83.3%)** |
+| Paired expected behavior | **10/12 (83.3%)** |
+| Privacy and Selection gates | **5/5 (100%)** |
+| Overall expected behavior | **15/17 (88.2%)** |
+| Execution errors | **1/17 (5.9%)** |
+
+The failures are retained in the committed evidence. `mem_recall_03` stored
+the complete balcony-garden and basil Episode, but the 4B generator used the
+hobby and omitted the requested plant name. `mem_recall_06` produced no Store
+item after the bounded worker retries; worker logs showed three structured
+output validation failures. This separates a response-quality miss from an
+Extraction reliability miss instead of presenting a misleading perfect score.
+
+### Limitations
+
+- This is one run over six recall pairs and five gates, not a statistically
+  stable estimate of production recall. The cases are hand-authored by one
+  evaluator.
+- The 4B local model is deliberately inexpensive but is the limiting component
+  in both observed failures. The deterministic privacy barriers passed every
+  case, while model-dependent recall did not.
+- This benchmark covers the implemented episodic C′ slice. Stable preferences
+  and conflict-aware semantic Consolidation are intentionally excluded until
+  that layer exists.
+
+---
+
 ## Reproducibility
 
 Benchmark construction is deterministic given the seed and indexed corpus.
@@ -469,6 +534,15 @@ uv run python eval_safety.py               # safety probes
 
 # 3. Generate all figures and summary tables
 python ../analysis/analyze.py
+```
+
+The memory benchmark requires a running API with `MEMORY_ENABLED=true`, the
+worker enabled, PostgreSQL/pgvector, and the models named in
+`configs/memory_eval.yaml` available through LM Studio:
+
+```bash
+uv run python eval_memory.py --max-recall 1 --skip-gates  # two-case smoke
+uv run python eval_memory.py                              # full 17 cases
 ```
 
 Re-scoring without regenerating responses (cheap):
