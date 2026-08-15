@@ -51,6 +51,7 @@ Thumbs.db
 AGENTS.md
 CLAUDE.md
 .claude/
+.agents/
 
 # Index for RAG
 backend/data/MentalChat16K_faiss_index/
