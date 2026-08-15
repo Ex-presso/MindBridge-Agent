@@ -47,8 +47,8 @@ _EXPLICIT_PATTERNS: tuple[tuple[SemanticKind, re.Pattern[str]], ...] = (
     (
         "helpful_strategy",
         re.compile(
-            r"\b(?:helps?\s+me|calms?\s+me|grounds?\s+me|"
-            r"works?\s+for\s+me|makes?\s+me\s+feel\s+"
+            r"\b(?:helps\s+me|calms\s+me|grounds\s+me|"
+            r"works\s+for\s+me|makes\s+me\s+feel\s+"
             r"(?:calm|calmer|steady|better|safe))\b",
             re.IGNORECASE,
         ),

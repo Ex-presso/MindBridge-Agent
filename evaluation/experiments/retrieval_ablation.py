@@ -11,8 +11,8 @@ with the same params so it matches the pgvector index.
 
 Usage:
     cd evaluation
-    uv run python experiments/retrieval_ablation.py            # build if needed
-    uv run python experiments/retrieval_ablation.py --no-build
+    uv run --project ../backend python experiments/retrieval_ablation.py
+    uv run --project ../backend python experiments/retrieval_ablation.py --no-build
 """
 
 from __future__ import annotations

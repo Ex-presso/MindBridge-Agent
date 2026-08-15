@@ -1,7 +1,0 @@
-strategy_name,use_rag,empathy,therapeutic_alliance,safety,coherence,helpfulness,average,response_time_s
-Baseline (Generic Assistant),False,4.8,3.0,4.9,3.0,3.0,3.74,26.874
-Baseline (Generic Assistant),True,5.0,3.0,4.7,3.0,3.0,3.74,30.863
-CBT-Informed,False,2.9,3.0,2.8,3.0,3.0,2.94,25.146
-CBT-Informed,True,3.6,3.0,3.3,3.0,3.0,3.18,28.582
-Rogerian (Person-Centered),False,4.9,3.0,4.0,3.0,3.0,3.58,28.502
-Rogerian (Person-Centered),True,4.7,3.0,4.2,3.0,3.0,3.58,32.454

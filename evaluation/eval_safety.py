@@ -11,8 +11,8 @@ diagnostic, not a leaderboard score.
 
 Usage:
     cd evaluation/
-    uv run python eval_safety.py
-    uv run python eval_safety.py --max-queries 5  # smoke test
+    uv run --project ../backend python eval_safety.py
+    uv run --project ../backend python eval_safety.py --max-queries 5
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -28,6 +29,7 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 from tqdm.auto import tqdm
 
@@ -36,25 +38,30 @@ EVAL_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(EVAL_ROOT))
 
-from dotenv import load_dotenv
-
 load_dotenv(ROOT / "backend" / ".env")
 
 
-def _apply_collection_override() -> None:
+def _apply_eval_overrides() -> None:
     cfg_path = Path(__file__).parent / "configs" / "safety_eval.yaml"
     if not cfg_path.exists():
         return
-    import os
-
     with cfg_path.open() as f:
         cfg = yaml.safe_load(f) or {}
     coll = cfg.get("pgvector_collection")
     if coll:
         os.environ["PGVECTOR_COLLECTION"] = coll
+    embedding_provider = cfg.get("embedding_provider")
+    if embedding_provider:
+        os.environ["EMBEDDING_PROVIDER"] = embedding_provider
+    embedding_model = cfg.get("embedding_model")
+    if embedding_model:
+        os.environ["EMBEDDING_MODEL"] = embedding_model
+    embedding_base_url = cfg.get("embedding_base_url")
+    if embedding_base_url:
+        os.environ["EMBEDDING_BASE_URL"] = embedding_base_url
 
 
-_apply_collection_override()
+_apply_eval_overrides()
 
 from app.core.agent.agent import Agent, AgentRunContext  # noqa: E402
 from app.core.llm.provider import get_llm  # noqa: E402
@@ -84,18 +91,18 @@ def load_probes(path: Path) -> tuple[list[dict], dict]:
 
 
 def build_agent(cfg: dict) -> Agent:
+    api_key_env = cfg["llm_api_key_env"]
+    api_key = os.environ.get(api_key_env)
+    if not api_key:
+        raise ValueError(f"{api_key_env} is required for the safety evaluation.")
+    target_temp = cfg.get("temperature", 0.0)
     llm = get_llm(
         provider=cfg["llm_provider"],
-        api_key=cfg.get("llm_api_key"),
+        api_key=api_key,
         base_url=cfg.get("llm_base_url"),
         model=cfg.get("llm_model"),
+        temperature=target_temp,
     )
-    target_temp = cfg.get("temperature", 0.3)
-    if hasattr(llm, "temperature"):
-        try:
-            llm.temperature = target_temp
-        except Exception as exc:
-            logger.warning("Could not set llm.temperature: %s", exc)
     return Agent(llm, checkpointer=None)
 
 
@@ -191,7 +198,11 @@ async def run_one(agent: Agent, query: str) -> tuple[str, float]:
     result = await agent.app.ainvoke(state, context=AgentRunContext())
     elapsed = time.time() - t0
     final_ai = next(
-        (m for m in reversed(result["messages"]) if isinstance(m, AIMessage) and not m.tool_calls),
+        (
+            m
+            for m in reversed(result["messages"])
+            if isinstance(m, AIMessage) and not m.tool_calls
+        ),
         None,
     )
     response_text = str(final_ai.content) if final_ai is not None else ""
@@ -247,8 +258,11 @@ async def main_async(max_queries: int | None, score_only: bool) -> None:
                 logger.warning("Probe %s missing from existing CSV; skipping", p["id"])
                 continue
             r = prev_by_id[p["id"]]
-            rows.append(_score_row(p, str(r.get("response", "")),
-                                   float(r.get("response_time_s", 0.0))))
+            rows.append(
+                _score_row(
+                    p, str(r.get("response", "")), float(r.get("response_time_s", 0.0))
+                )
+            )
             pd.DataFrame(rows).to_csv(per_path, index=False)
     else:
         agent = build_agent(cfg)
@@ -302,12 +316,19 @@ async def main_async(max_queries: int | None, score_only: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Safety probe evaluation")
-    parser.add_argument("--max-queries", type=int, default=None,
-                        help="Limit number of probes (for smoke testing)")
-    parser.add_argument("--score-only", action="store_true",
-                        help="Skip agent generation; re-score the existing per-probe "
-                             "CSV with the current rubric/regex. Useful when probe "
-                             "definitions or marker patterns change.")
+    parser.add_argument(
+        "--max-queries",
+        type=int,
+        default=None,
+        help="Limit number of probes (for smoke testing)",
+    )
+    parser.add_argument(
+        "--score-only",
+        action="store_true",
+        help="Skip agent generation; re-score the existing per-probe "
+        "CSV with the current rubric/regex. Useful when probe "
+        "definitions or marker patterns change.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
     asyncio.run(main_async(args.max_queries, args.score_only))

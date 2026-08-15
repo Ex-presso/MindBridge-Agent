@@ -22,8 +22,8 @@ import unicodedata
 # Persisted alongside historical conversation reviews. Increment whenever the
 # deterministic patterns change so previously clean conversations fail closed
 # until their relational user-message history is reviewed again.
-# Version 4 narrows the product to English-only detection.
-CRISIS_DETECTOR_VERSION = 4
+# Version 5 adds compound threat-context detection for target access.
+CRISIS_DETECTOR_VERSION = 5
 
 # Self-harm / suicidal ideation in the first person, plus method-seeking
 # ("way to die", overdose). Bare injury phrases ("hurt myself", "killing me",
@@ -68,6 +68,16 @@ _HARM_OTHERS = re.compile(
     re.IGNORECASE,
 )
 
+_HARM_OTHERS_GRIEVANCE = re.compile(
+    r"\b(?:deserves? to (?:suffer|die|be hurt)|(?:should|needs? to) pay)\b",
+    re.IGNORECASE,
+)
+_HARM_OTHERS_ACCESS = re.compile(
+    r"\b(?:i know where (?:he|she|they|my ex) (?:lives?|works?)|"
+    r"i (?:have|know) (?:his|her|their|my ex'?s) (?:address|location))\b",
+    re.IGNORECASE,
+)
+
 def detect_crisis(text: str | None) -> str | None:
     """Return 'self_harm', 'harm_to_others', or None."""
     if not text:
@@ -75,7 +85,10 @@ def detect_crisis(text: str | None) -> str | None:
     normalized = unicodedata.normalize("NFKC", text)
     if _SELF_HARM.search(normalized):
         return "self_harm"
-    if _HARM_OTHERS.search(normalized):
+    if _HARM_OTHERS.search(normalized) or (
+        _HARM_OTHERS_GRIEVANCE.search(normalized)
+        and _HARM_OTHERS_ACCESS.search(normalized)
+    ):
         return "harm_to_others"
     return None
 

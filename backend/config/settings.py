@@ -3,18 +3,21 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from typing import Literal
 
+
 class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8080
     DEBUG: bool = False
+    DEFAULT_LLM_MODEL: str = "deepseek-v4-flash"
+    DEFAULT_LLM_BASE_URL: str = "https://api.deepseek.com"
     OPENAI_MODEL: str = "gpt-5"
     GEMINI_MODEL: str = "gemini-2.5-flash"
     OPENAI_API_KEY: SecretStr | None = None
     GEMINI_API_KEY: SecretStr | None = None
     MODEL_TEMPERATURE: float = 0.3
 
-    # RAG settings. chunk_size=2000 is the IR-benchmark winner (NDCG@5 0.537
-    # vs 0.443 at 1000); overlap had no measurable effect. See docs/EVALUATION.md.
+    # RAG settings. The current retrieval benchmark must be rerun before these
+    # production defaults are presented as an evaluated optimum.
     RAG_CHUNK_SIZE: int = 2000
     RAG_CHUNK_OVERLAP: int = 100
     RAG_TOP_K: int = 3
@@ -27,8 +30,8 @@ class Settings(BaseSettings):
     # with a placeholder before paying for LLM summarization. See docs/MEMORY.md.
     COMPACT_TRIGGER_TOKENS: int = 6000
     COMPACT_KEEP_RECENT_TOKENS: int = 2000
-    COMPACT_MICRO_KEEP_RESULTS: int = 3    # keep the last N tool results verbatim
-    COMPACT_MICRO_MIN_CHARS: int = 120     # only compact tool results longer than this
+    COMPACT_MICRO_KEEP_RESULTS: int = 3  # keep the last N tool results verbatim
+    COMPACT_MICRO_MIN_CHARS: int = 120  # only compact tool results longer than this
 
     # Global kill switch for durable, cross-conversation memory. Per-user
     # consent is stored separately on User.memory_enabled and defaults off.
@@ -60,7 +63,9 @@ class Settings(BaseSettings):
     EMBEDDING_QUERY_INSTRUCTION: str = ""
 
     # PostgreSQL / pgvector
-    DATABASE_URL: str = "postgresql+psycopg://mindbridge:mindbridge_dev@localhost:5432/mindbridge"
+    DATABASE_URL: str = (
+        "postgresql+psycopg://mindbridge:mindbridge_dev@localhost:5432/mindbridge"
+    )
     # Credential/account deletion barriers rely on a fresh statement snapshot
     # after a blocked row lock is released. Do not make this configurable to a
     # snapshot isolation level without adding a credential epoch protocol.
@@ -72,7 +77,7 @@ class Settings(BaseSettings):
     INDEX_DIR: Path = DATA_DIR / "MentalChat16K_faiss_index"
 
     CORS_ORIGINS: list[str] = [
-        "http://localhost:3000", 
+        "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:7860",
         "http://127.0.0.1:7860",
@@ -129,7 +134,7 @@ class Settings(BaseSettings):
         env_file=Path(__file__).parent.parent / ".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
-        extra="ignore"
+        extra="ignore",
     )
 
     @property
@@ -141,5 +146,6 @@ class Settings(BaseSettings):
     def CHECKPOINT_DATABASE_URL(self) -> str:
         """psycopg3 URL for LangGraph checkpointer (no driver prefix)."""
         return self.DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+
 
 settings = Settings()

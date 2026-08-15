@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "description": "Frozen fictional scenarios for live multi-session memory on/off evaluation.",
+  "version": 2,
+  "description": "Frozen fictional scenarios for live episodic and Semantic memory acceptance.",
   "recall_scenarios": [
     {
       "id": "mem_recall_01",
@@ -30,13 +30,43 @@
       "id": "mem_recall_05",
       "source": "I start a new job at a library on the first Monday of September, and I feel nervous about it. Please remember this.",
       "probe": "I am nervous about the upcoming change I mentioned. Reflect back what it is, where it is, and when it starts.",
-      "expected_groups": [["new job"], ["library"], ["September"]]
+      "expected_groups": [["new job", "job"], ["library"], ["September"]]
     },
     {
       "id": "mem_recall_06",
       "source": "My cat Luna sits with me in the evening when I feel anxious, and that routine calms me down. Please remember it.",
       "probe": "I feel anxious this evening. Remind me of the source of comfort I told you about, including its name.",
       "expected_groups": [["cat"], ["Luna"], ["evening", "night"]]
+    }
+  ],
+  "semantic_scenarios": [
+    {
+      "id": "mem_semantic_preference",
+      "semantic_kind": "preference",
+      "source": "I prefer replies that use one short paragraph and a direct tone. Please remember this.",
+      "probe": "I feel stressed. Before supporting me, remind me what response length and tone I asked you to use.",
+      "expected_groups": [["short paragraph"], ["direct tone"]]
+    },
+    {
+      "id": "mem_semantic_goal",
+      "semantic_kind": "goal",
+      "source": "My current goal is to finish the Aurora API prototype before Friday. Please remember this.",
+      "probe": "What project goal and deadline did I tell you about?",
+      "expected_groups": [["Aurora"], ["API prototype", "prototype"], ["Friday"]]
+    },
+    {
+      "id": "mem_semantic_strategy",
+      "semantic_kind": "helpful_strategy",
+      "source": "A slow five-minute breathing exercise helps me feel steady before presentations. Please remember this.",
+      "probe": "What strategy did I say helps me before presentations?",
+      "expected_groups": [["breathing"], ["five-minute", "five minute"], ["presentation"]]
+    },
+    {
+      "id": "mem_semantic_person",
+      "semantic_kind": "important_person",
+      "source": "My sister Nora is important to me because she listens when I feel overwhelmed. Please remember this.",
+      "probe": "Who did I say is important to me, and what is her relationship to me?",
+      "expected_groups": [["Nora"], ["sister"]]
     }
   ],
   "gate_scenarios": [
@@ -73,6 +103,24 @@
       "source": "My calm weekend routine is arranging postcards in a red album. Please remember that.",
       "probe": "I had a disagreement with a coworker and feel frustrated. Help me reflect on that.",
       "expected_groups": [["postcards"], ["red album"]]
+    },
+    {
+      "id": "mem_gate_semantic_rejection",
+      "kind": "semantic_rejection",
+      "source": "Sometimes bullet points are easy to scan, but I have not chosen a communication preference.",
+      "expected_groups": []
+    },
+    {
+      "id": "mem_gate_idempotency",
+      "kind": "idempotency",
+      "source": "I prefer replies that use a single short paragraph. Please remember this.",
+      "expected_groups": [["single short paragraph", "short paragraph"]]
+    },
+    {
+      "id": "mem_gate_account_deletion",
+      "kind": "account_deletion",
+      "source": "My grounding phrase is silver meadow, and repeating it helps me settle. Please remember it.",
+      "expected_groups": [["silver meadow"]]
     }
   ]
 }

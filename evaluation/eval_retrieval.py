@@ -12,8 +12,8 @@ Gold construction:
 
 Usage:
     cd evaluation/
-    uv run python eval_retrieval.py
-    uv run python eval_retrieval.py --no-build  # skip index (re)building
+    uv run --project ../backend python eval_retrieval.py
+    uv run --project ../backend python eval_retrieval.py --no-build
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from tqdm import tqdm
 
@@ -35,8 +36,6 @@ ROOT = Path(__file__).resolve().parent.parent
 EVAL_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(EVAL_ROOT))
-
-from dotenv import load_dotenv
 
 load_dotenv(ROOT / "backend" / ".env")
 
@@ -143,7 +142,7 @@ def run_retrieval_eval(skip_build: bool = False) -> pd.DataFrame:
     if not benchmark_path.exists():
         raise FileNotFoundError(
             f"Benchmark not found at {benchmark_path}. "
-            "Run `uv run python build_ir_benchmark.py` first."
+            "Run `uv run --project ../backend python build_ir_benchmark.py` first."
         )
     queries = load_benchmark(benchmark_path)
     print(f"Loaded {len(queries)} queries from {benchmark_path}")

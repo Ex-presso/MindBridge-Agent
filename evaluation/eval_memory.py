@@ -1,4 +1,4 @@
-"""Live multi-session memory on/off benchmark.
+"""Live multi-session episodic and Semantic memory benchmark.
 
 This runner exercises the public API against a running MindBridge stack. It
 uses disposable users, real chat turns, the outbox worker, and LangGraph Store;
@@ -6,8 +6,8 @@ it is an evaluation artifact rather than a pytest suite.
 
 Usage:
     cd evaluation
-    uv run python eval_memory.py
-    uv run python eval_memory.py --max-recall 1 --skip-gates
+    uv run --project ../backend python eval_memory.py
+    uv run --project ../backend python eval_memory.py --max-recall 1 --skip-gates
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import csv
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -23,14 +24,23 @@ from typing import Any
 
 import httpx
 import yaml
+from dotenv import load_dotenv
 
 EVALUATION_ERRORS = (httpx.HTTPError, TimeoutError, KeyError, TypeError, ValueError)
 
+ROOT = Path(__file__).resolve().parent.parent
 EVAL_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = EVAL_DIR / "configs" / "memory_eval.yaml"
 DATASET_PATH = EVAL_DIR / "datasets" / "memory_benchmark.json"
 RESULTS_PATH = EVAL_DIR / "results" / "memory_eval_results.csv"
 SUMMARY_PATH = EVAL_DIR / "results" / "memory_eval_summary.csv"
+
+load_dotenv(ROOT / "backend" / ".env")
+
+_registration_lock = asyncio.Lock()
+_next_registration_at = 0.0
+_deletion_lock = asyncio.Lock()
+_next_deletion_at = 0.0
 
 RESULT_FIELDS = [
     "case_id",
@@ -75,6 +85,26 @@ def write_results(rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+async def pace_registration(interval_s: float) -> None:
+    """Keep the live benchmark within the production auth rate limit."""
+    global _next_registration_at
+    async with _registration_lock:
+        delay = _next_registration_at - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        _next_registration_at = time.monotonic() + interval_s
+
+
+async def pace_deletion(interval_s: float) -> None:
+    """Keep disposable-account cleanup within the auth deletion limit."""
+    global _next_deletion_at
+    async with _deletion_lock:
+        delay = _next_deletion_at - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        _next_deletion_at = time.monotonic() + interval_s
+
+
 class LiveUser:
     def __init__(self, cfg: dict[str, Any], label: str):
         self.cfg = cfg
@@ -92,14 +122,25 @@ class LiveUser:
         return {"Authorization": f"Bearer {self.token}"}
 
     async def create(self) -> None:
-        response = await self.client.post(
-            "/auth/register",
-            json={
-                "email": self.email,
-                "password": self.password,
-                "display_name": "Memory Eval",
-            },
-        )
+        api_key_env = self.cfg["provider_api_key_env"]
+        api_key = os.environ.get(api_key_env)
+        if not api_key:
+            raise ValueError(
+                f"{api_key_env} is required for the live memory evaluation."
+            )
+        interval_s = float(self.cfg["registration_interval_s"])
+        for _ in range(6):
+            await pace_registration(interval_s)
+            response = await self.client.post(
+                "/auth/register",
+                json={
+                    "email": self.email,
+                    "password": self.password,
+                    "display_name": "Memory Eval",
+                },
+            )
+            if response.status_code != 429:
+                break
         response.raise_for_status()
         self.token = response.json()["access_token"]
         response = await self.client.put(
@@ -107,7 +148,7 @@ class LiveUser:
             headers=self.headers,
             json={
                 "provider": self.cfg["provider"],
-                "api_key": self.cfg["provider_api_key"],
+                "api_key": api_key,
                 "base_url": self.cfg["provider_base_url"],
                 "model_id": self.cfg["model"],
                 "display_name": "Memory Eval Model",
@@ -124,9 +165,9 @@ class LiveUser:
         response.raise_for_status()
         return response.json()
 
-    async def memory(self) -> dict[str, Any]:
+    async def memory(self, category: str = "episodes") -> dict[str, Any]:
         response = await self.client.get(
-            "/memory?category=episodes&limit=100",
+            f"/memory?category={category}&limit=100",
             headers=self.headers,
         )
         response.raise_for_status()
@@ -137,14 +178,19 @@ class LiveUser:
         response.raise_for_status()
         return response.json()
 
-    async def chat(self, message: str) -> tuple[str, float]:
+    async def chat(
+        self,
+        message: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> tuple[str, float, str]:
         started = time.perf_counter()
         response = await self.client.post(
             "/chat",
             headers=self.headers,
             json={
                 "message": message,
-                "conversation_id": None,
+                "conversation_id": conversation_id,
                 "model": self.cfg["model"],
                 "provider": self.cfg["provider"],
                 "stream": False,
@@ -152,26 +198,76 @@ class LiveUser:
         )
         response.raise_for_status()
         elapsed = time.perf_counter() - started
-        return response.json()["message"]["content"], round(elapsed, 3)
+        payload = response.json()
+        return (
+            payload["message"]["content"],
+            round(elapsed, 3),
+            payload["conversation_id"],
+        )
 
-    async def wait_for_items(self, minimum: int = 1) -> dict[str, Any]:
+    async def wait_for_items(
+        self,
+        minimum: int = 1,
+        *,
+        category: str = "episodes",
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + self.cfg["memory_wait_timeout_s"]
         while time.monotonic() < deadline:
-            snapshot = await self.memory()
+            snapshot = await self.memory(category)
             if len(snapshot["items"]) >= minimum:
                 return snapshot
             await asyncio.sleep(self.cfg["poll_interval_s"])
-        raise TimeoutError(f"Memory writer did not produce {minimum} item(s) in time.")
+        raise TimeoutError(
+            f"Memory writer did not produce {minimum} {category} item(s) in time."
+        )
+
+    async def wait_for_episode_revision(
+        self, conversation_id: str, minimum: int
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + self.cfg["memory_wait_timeout_s"]
+        while time.monotonic() < deadline:
+            snapshot = await self.memory("episodes")
+            for item in snapshot["items"]:
+                if (
+                    item["key"] == conversation_id
+                    and int(item["value"].get("target_revision", 0)) >= minimum
+                ):
+                    return snapshot
+            await asyncio.sleep(self.cfg["poll_interval_s"])
+        raise TimeoutError(
+            f"Episode {conversation_id} did not reach revision {minimum} in time."
+        )
+
+    async def _delete_account(self) -> httpx.Response:
+        interval_s = float(self.cfg["account_deletion_interval_s"])
+        for _ in range(6):
+            await pace_deletion(interval_s)
+            response = await self.client.request(
+                "DELETE",
+                "/auth/me",
+                headers=self.headers,
+                json={"password": self.password},
+            )
+            if response.status_code != 429:
+                return response
+        return response
+
+    async def delete_account_and_verify(self) -> tuple[bool, bool]:
+        old_headers = self.headers
+        response = await self._delete_account()
+        response.raise_for_status()
+        self.token = ""
+        rejected = await self.client.get("/memory", headers=old_headers)
+        login = await self.client.post(
+            "/auth/login",
+            json={"email": self.email, "password": self.password},
+        )
+        return rejected.status_code == 401, login.status_code == 401
 
     async def delete(self) -> None:
         try:
             if self.token:
-                response = await self.client.request(
-                    "DELETE",
-                    "/auth/me",
-                    headers=self.headers,
-                    json={"password": self.password},
-                )
+                response = await self._delete_account()
                 response.raise_for_status()
         finally:
             await self.client.aclose()
@@ -211,14 +307,16 @@ async def run_recall_case(
         await user.create()
         if condition == "on":
             await user.set_memory(True)
-        _, row["source_latency_s"] = await user.chat(scenario["source"])
-        snapshot = await user.wait_for_items() if condition == "on" else await user.memory()
+        _, row["source_latency_s"], _ = await user.chat(scenario["source"])
+        snapshot = (
+            await user.wait_for_items() if condition == "on" else await user.memory()
+        )
         row["item_count"] = len(snapshot["items"])
         row["grounded"] = matches_all_groups(
             flatten_items(snapshot["items"]),
             scenario["expected_groups"],
         )
-        response, row["probe_latency_s"] = await user.chat(scenario["probe"])
+        response, row["probe_latency_s"], _ = await user.chat(scenario["probe"])
         row["response_excerpt"] = response[:500].strip()
         row["recalled"] = matches_all_groups(response, scenario["expected_groups"])
         row["passed"] = (
@@ -239,13 +337,50 @@ async def prepare_memory(
 ) -> tuple[dict[str, Any], bool, float]:
     await user.create()
     await user.set_memory(True)
-    _, source_latency = await user.chat(scenario["source"])
+    _, source_latency, _ = await user.chat(scenario["source"])
     snapshot = await user.wait_for_items()
     grounded = matches_all_groups(
         flatten_items(snapshot["items"]),
         scenario["expected_groups"],
     )
     return snapshot, grounded, source_latency
+
+
+async def run_semantic_case(
+    cfg: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    user = LiveUser(cfg, scenario["id"])
+    row = gate_row({"id": scenario["id"], "kind": "semantic_recall"})
+    row["condition"] = scenario["semantic_kind"]
+    try:
+        await user.create()
+        await user.set_memory(True)
+        _, row["source_latency_s"], _ = await user.chat(scenario["source"])
+        snapshot = await user.wait_for_items(category="semantic")
+        expected_items = [
+            item
+            for item in snapshot["items"]
+            if item["value"].get("kind") == scenario["semantic_kind"]
+        ]
+        row["item_count"] = len(snapshot["items"])
+        row["grounded"] = bool(expected_items) and matches_all_groups(
+            flatten_items(expected_items),
+            scenario["expected_groups"],
+        )
+        response, row["probe_latency_s"], _ = await user.chat(scenario["probe"])
+        row["response_excerpt"] = response[:500].strip()
+        row["recalled"] = matches_all_groups(response, scenario["expected_groups"])
+        row["passed"] = row["grounded"] and row["recalled"]
+        row["details"] = (
+            f"Expected one grounded {scenario['semantic_kind']} fact and "
+            "cross-session recall."
+        )
+    except EVALUATION_ERRORS as exc:
+        row["error"] = str(exc)
+    finally:
+        await cleanup(user)
+    return row
 
 
 def gate_row(scenario: dict[str, Any]) -> dict[str, Any]:
@@ -265,7 +400,9 @@ def gate_row(scenario: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[str, Any]:
+async def run_gate_case(
+    cfg: dict[str, Any], scenario: dict[str, Any]
+) -> dict[str, Any]:
     kind = scenario["kind"]
     row = gate_row(scenario)
     primary: LiveUser | None = None
@@ -275,12 +412,13 @@ async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             primary = LiveUser(cfg, scenario["id"])
             await primary.create()
             await primary.set_memory(True)
-            _, row["source_latency_s"] = await primary.chat(scenario["source"])
+            _, row["source_latency_s"], _ = await primary.chat(scenario["source"])
             await asyncio.sleep(5)
             snapshot = await primary.memory()
+            semantic = await primary.memory("semantic")
             row["item_count"] = len(snapshot["items"])
-            row["passed"] = row["item_count"] == 0
-            row["details"] = "Crisis turns must not enqueue durable episodes."
+            row["passed"] = row["item_count"] == 0 and not semantic["items"]
+            row["details"] = "Crisis turns must not write episodic or Semantic memory."
             return row
 
         if kind == "isolation":
@@ -290,7 +428,7 @@ async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             await secondary.create()
             await secondary.set_memory(True)
             other_snapshot = await secondary.memory()
-            response, probe_latency = await secondary.chat(scenario["probe"])
+            response, probe_latency, _ = await secondary.chat(scenario["probe"])
             row.update(
                 grounded=grounded,
                 item_count=len(other_snapshot["items"]),
@@ -305,7 +443,60 @@ async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[s
                 and row["item_count"] == 0
                 and not row["recalled"]
             )
-            row["details"] = "A second user must not list or recall the owner's episode."
+            row["details"] = (
+                "A second user must not list or recall the owner's episode."
+            )
+            return row
+
+        if kind == "semantic_rejection":
+            primary = LiveUser(cfg, scenario["id"])
+            await primary.create()
+            await primary.set_memory(True)
+            _, row["source_latency_s"], _ = await primary.chat(scenario["source"])
+            await primary.wait_for_items(category="episodes")
+            semantic = await primary.memory("semantic")
+            row["item_count"] = len(semantic["items"])
+            row["passed"] = row["item_count"] == 0
+            row["details"] = (
+                "A non-explicit statement must not be promoted to Semantic memory."
+            )
+            return row
+
+        if kind == "idempotency":
+            primary = LiveUser(cfg, scenario["id"])
+            await primary.create()
+            await primary.set_memory(True)
+            _, row["source_latency_s"], conversation_id = await primary.chat(
+                scenario["source"]
+            )
+            first = await primary.wait_for_items(category="semantic")
+            first_items = first["items"]
+            if len(first_items) != 1:
+                raise ValueError(
+                    "Expected exactly one Semantic item after the first write."
+                )
+            key = first_items[0]["key"]
+            _, row["probe_latency_s"], _ = await primary.chat(
+                scenario["source"],
+                conversation_id=conversation_id,
+            )
+            episodes = await primary.wait_for_episode_revision(conversation_id, 2)
+            second = await primary.memory("semantic")
+            row["item_count"] = len(second["items"]) + len(episodes["items"])
+            row["grounded"] = matches_all_groups(
+                flatten_items(second["items"]), scenario["expected_groups"]
+            )
+            row["passed"] = (
+                row["grounded"]
+                and len(second["items"]) == 1
+                and len(episodes["items"]) == 1
+                and second["items"][0]["key"] == key
+                and int(second["items"][0]["value"].get("version", 0)) == 1
+            )
+            row["details"] = (
+                "Repeating one explicit fact in the same conversation must keep "
+                "one Semantic version and advance one Episode, not duplicate either."
+            )
             return row
 
         primary = LiveUser(cfg, scenario["id"])
@@ -319,7 +510,7 @@ async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[s
         if kind == "consent_off":
             status = await primary.set_memory(False)
             retained = await primary.memory()
-            response, probe_latency = await primary.chat(scenario["probe"])
+            response, probe_latency, _ = await primary.chat(scenario["probe"])
             row.update(
                 item_count=len(retained["items"]),
                 probe_latency_s=probe_latency,
@@ -332,11 +523,13 @@ async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[s
                 and row["item_count"] >= 1
                 and not row["recalled"]
             )
-            row["details"] = "Consent off retains inspectable data but blocks Selection and writes."
+            row["details"] = (
+                "Consent off retains inspectable data but blocks Selection and writes."
+            )
         elif kind == "clear":
             deleted = await primary.clear_memory()
             cleared = await primary.memory()
-            response, probe_latency = await primary.chat(scenario["probe"])
+            response, probe_latency, _ = await primary.chat(scenario["probe"])
             row.update(
                 item_count=len(cleared["items"]),
                 probe_latency_s=probe_latency,
@@ -349,9 +542,11 @@ async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[s
                 and row["item_count"] == 0
                 and not row["recalled"]
             )
-            row["details"] = "Clear must disable memory, delete Store items, and block recall."
+            row["details"] = (
+                "Clear must disable memory, delete Store items, and block recall."
+            )
         elif kind == "irrelevant_rejection":
-            response, probe_latency = await primary.chat(scenario["probe"])
+            response, probe_latency, _ = await primary.chat(scenario["probe"])
             row.update(
                 probe_latency_s=probe_latency,
                 response_excerpt=response[:500].strip(),
@@ -359,6 +554,12 @@ async def run_gate_case(cfg: dict[str, Any], scenario: dict[str, Any]) -> dict[s
             )
             row["passed"] = grounded and not row["recalled"]
             row["details"] = "An unrelated turn must not surface the stored canary."
+        elif kind == "account_deletion":
+            token_rejected, login_rejected = await primary.delete_account_and_verify()
+            row["passed"] = grounded and token_rejected and login_rejected
+            row["details"] = (
+                "Account deletion must invalidate the access token and remove login identity."
+            )
         else:
             raise ValueError(f"Unknown gate kind: {kind}")
     except EVALUATION_ERRORS as exc:
@@ -376,18 +577,58 @@ def write_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     paired = [row for row in rows if row["kind"] == "paired_recall"]
     recall_on = [row for row in paired if row["condition"] == "on"]
     recall_off = [row for row in paired if row["condition"] == "off"]
+    semantic = [row for row in rows if row["kind"] == "semantic_recall"]
     gates = [row for row in rows if row["condition"] == "gate"]
     on_rate = rate(recall_on, "recalled")
     off_rate = rate(recall_off, "recalled")
     summary = [
         {"metric": "recall_on_rate", "n": len(recall_on), "value": on_rate},
         {"metric": "recall_off_rate", "n": len(recall_off), "value": off_rate},
-        {"metric": "recall_lift", "n": len(recall_on), "value": round(on_rate - off_rate, 4)},
-        {"metric": "grounded_storage_rate", "n": len(recall_on), "value": rate(recall_on, "grounded")},
-        {"metric": "paired_expected_behavior_pass_rate", "n": len(paired), "value": rate(paired, "passed")},
-        {"metric": "privacy_selection_gate_pass_rate", "n": len(gates), "value": rate(gates, "passed")},
-        {"metric": "overall_expected_behavior_pass_rate", "n": len(rows), "value": rate(rows, "passed")},
-        {"metric": "execution_error_rate", "n": len(rows), "value": rate(rows, "error")},
+        {
+            "metric": "recall_lift",
+            "n": len(recall_on),
+            "value": round(on_rate - off_rate, 4),
+        },
+        {
+            "metric": "grounded_storage_rate",
+            "n": len(recall_on),
+            "value": rate(recall_on, "grounded"),
+        },
+        {
+            "metric": "paired_expected_behavior_pass_rate",
+            "n": len(paired),
+            "value": rate(paired, "passed"),
+        },
+        {
+            "metric": "semantic_storage_rate",
+            "n": len(semantic),
+            "value": rate(semantic, "grounded"),
+        },
+        {
+            "metric": "semantic_recall_rate",
+            "n": len(semantic),
+            "value": rate(semantic, "recalled"),
+        },
+        {
+            "metric": "semantic_expected_behavior_pass_rate",
+            "n": len(semantic),
+            "value": rate(semantic, "passed"),
+        },
+        {
+            "metric": "privacy_safety_idempotency_gate_pass_rate",
+            "n": len(gates),
+            "value": rate(gates, "passed"),
+        },
+        {
+            "metric": "overall_expected_behavior_pass_rate",
+            "n": len(rows),
+            "value": rate(rows, "passed"),
+        },
+        {
+            "metric": "execution_error_rate",
+            "n": len(rows),
+            "value": rate(rows, "error"),
+        },
     ]
     with SUMMARY_PATH.open("w", newline="") as file:
         writer = csv.DictWriter(
@@ -400,7 +641,11 @@ def write_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return summary
 
 
-async def run(max_recall: int | None, skip_gates: bool) -> None:
+async def run(
+    max_recall: int | None,
+    skip_gates: bool,
+    skip_semantic: bool,
+) -> None:
     cfg = load_yaml(CONFIG_PATH)
     dataset = load_json(DATASET_PATH)
     recall_scenarios = dataset["recall_scenarios"]
@@ -408,6 +653,8 @@ async def run(max_recall: int | None, skip_gates: bool) -> None:
         recall_scenarios = recall_scenarios[:max_recall]
 
     total = len(recall_scenarios) * 2
+    if not skip_semantic:
+        total += len(dataset["semantic_scenarios"])
     if not skip_gates:
         total += len(dataset["gate_scenarios"])
     print(
@@ -420,6 +667,18 @@ async def run(max_recall: int | None, skip_gates: bool) -> None:
         for condition in ("off", "on"):
             print(f"  {scenario['id']} [{condition}] ...", end=" ", flush=True)
             row = await run_recall_case(cfg, scenario, condition)
+            rows.append(row)
+            write_results(rows)
+            print("PASS" if row["passed"] else f"FAIL ({row['error'] or 'behavior'})")
+
+    if not skip_semantic:
+        for scenario in dataset["semantic_scenarios"]:
+            print(
+                f"  {scenario['id']} [{scenario['semantic_kind']}] ...",
+                end=" ",
+                flush=True,
+            )
+            row = await run_semantic_case(cfg, scenario)
             rows.append(row)
             write_results(rows)
             print("PASS" if row["passed"] else f"FAIL ({row['error'] or 'behavior'})")
@@ -444,8 +703,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Live memory on/off benchmark")
     parser.add_argument("--max-recall", type=int, default=None)
     parser.add_argument("--skip-gates", action="store_true")
+    parser.add_argument("--skip-semantic", action="store_true")
     args = parser.parse_args()
-    asyncio.run(run(args.max_recall, args.skip_gates))
+    asyncio.run(run(args.max_recall, args.skip_gates, args.skip_semantic))
 
 
 if __name__ == "__main__":

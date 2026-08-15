@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 from threading import RLock
-from typing import Any
-
-from datasets import load_dataset
-from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.vectorstores.base import VectorStoreRetriever
-from tqdm import tqdm
+from typing import TYPE_CHECKING, Any
 
 from config.settings import settings
+
+if TYPE_CHECKING:
+    from langchain_core.documents import Document
+    from langchain_core.embeddings import Embeddings
+    from langchain_core.vectorstores.base import VectorStoreRetriever
 
 
 @lru_cache(maxsize=4)
@@ -124,18 +122,26 @@ class VectorStore:
         self.ds: Any = None
         self.vectorstore: Any = None
         self.embedding = get_embeddings()
+        self.text_splitter: Any = None
+
+    def load_documents(self) -> None:
+        from datasets import load_dataset
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        self.ds = load_dataset("ShenLab/MentalChat16K")
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
         )
-
-    def load_documents(self) -> None:
-        self.ds = load_dataset("ShenLab/MentalChat16K")
         if self.max_samples and len(self.ds["train"]) > self.max_samples:
             self.ds["train"] = self.ds["train"].select(range(self.max_samples))
 
     def _example_to_documents(self) -> list[Document]:
+        from langchain_core.documents import Document
+        from tqdm import tqdm
+
         assert self.ds is not None, "Dataset not loaded"
+        assert self.text_splitter is not None, "Text splitter not initialized"
         docs: list[Document] = []
 
         for example_idx, ex in enumerate(tqdm(self.ds["train"], desc="Building chunks")):
@@ -181,6 +187,7 @@ class VectorStore:
         docs = self._example_to_documents()
 
         from langchain_postgres import PGVector
+        from tqdm import tqdm
 
         self.vectorstore = PGVector(
             embeddings=self.embedding,

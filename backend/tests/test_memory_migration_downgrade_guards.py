@@ -75,4 +75,4 @@ def test_005_downgrade_preserves_account_and_crisis_review_gates(pending: bool):
     # reviewed at a newer version make the preflight fail closed, which is
     # the intended behavior. Reviewed bumps: 3 -> 4 (English-only detection).
     assert migration.CRISIS_DETECTOR_VERSION == 3
-    assert CRISIS_DETECTOR_VERSION == 4
+    assert CRISIS_DETECTOR_VERSION == 5

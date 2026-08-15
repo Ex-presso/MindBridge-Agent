@@ -1,15 +1,20 @@
 """LLM provider factory — creates chat model instances."""
+
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from config.settings import settings
 
+STRUCTURED_OUTPUT_METHOD_METADATA_KEY = "mindbridge_structured_output_method"
+
 
 # Available models per provider (shown to user in frontend)
 PROVIDER_MODELS: dict[str, list[dict[str, str]]] = {
+    "openai_compatible": [],
     "openai": [
         {"id": "gpt-4o", "name": "GPT-4o"},
         {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
@@ -23,7 +28,6 @@ PROVIDER_MODELS: dict[str, list[dict[str, str]]] = {
         {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
         {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro"},
     ],
-    "openai_compatible": [],
     "anthropic_compatible": [],
 }
 
@@ -93,14 +97,35 @@ def get_llm(
         if not key and settings.OPENAI_API_KEY:
             key = settings.OPENAI_API_KEY.get_secret_value()
 
+        resolved_model = model or (
+            settings.DEFAULT_LLM_MODEL
+            if provider == "openai_compatible"
+            else settings.OPENAI_MODEL
+        )
+        resolved_base_url = base_url
+        if provider == "openai_compatible" and not resolved_base_url:
+            resolved_base_url = settings.DEFAULT_LLM_BASE_URL
+        is_deepseek = (
+            provider == "openai_compatible"
+            and resolved_base_url is not None
+            and urlparse(resolved_base_url).hostname == "api.deepseek.com"
+        )
+
         kwargs: dict = {
-            "model": model or settings.OPENAI_MODEL,
+            "model": resolved_model,
             "temperature": resolved_temperature,
         }
+        if is_deepseek:
+            # DeepSeek thinking mode rejects the forced tool choice used by
+            # LangChain's function-calling structured-output path.
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            kwargs["metadata"] = {
+                STRUCTURED_OUTPUT_METHOD_METADATA_KEY: "function_calling"
+            }
         if key:
             kwargs["api_key"] = key
-        if base_url:
-            kwargs["base_url"] = base_url
+        if resolved_base_url:
+            kwargs["base_url"] = resolved_base_url
         model_class = (
             _OpenAICompatibleChatOpenAI
             if provider == "openai_compatible"

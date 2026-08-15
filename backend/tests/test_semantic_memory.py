@@ -92,6 +92,7 @@ def test_explicit_statements_are_classified(content, expected_kind):
         "Work was hard today.",              # ordinary narration, not a fact
         "I think it might rain tomorrow.",   # speculation about the world
         "My manager scheduled a meeting.",   # a person, but no stated importance
+        "Help me reflect on that.",           # imperative, not a strategy claim
     ],
 )
 def test_ordinary_statements_are_not_promoted(content):

@@ -9,7 +9,7 @@ Saves to `evaluation/datasets/ir_benchmark.json`. Re-running with the same
 
 Usage:
     cd evaluation/
-    uv run python build_ir_benchmark.py --num-queries 30 --seed 42 \
+    uv run --project ../backend python build_ir_benchmark.py --num-queries 30 --seed 42 \
         --pool-size 3000 --min-input-words 8
 """
 

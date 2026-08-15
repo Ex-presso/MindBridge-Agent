@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 class SessionChatRequest(BaseModel):
     message: str = Field(max_length=4000)
     conversation_id: str | None = None
-    model: str = "gemini-2.5-flash"
-    provider: str = "google_genai"
+    model: str = "deepseek-v4-flash"
+    provider: str = "openai_compatible"
     stream: bool = True
 
 
@@ -43,8 +43,10 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[ChatMessage]
-    stream: bool = True 
-    provider: Optional[str] = Field(default=None, description="Optional provider override.")
+    stream: bool = True
+    provider: Optional[str] = Field(
+        default=None, description="Optional provider override."
+    )
 
 
 class ChatCompletionMessage(BaseModel):

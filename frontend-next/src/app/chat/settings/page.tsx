@@ -20,8 +20,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useMemory } from "@/hooks/useMemory";
 import { PROVIDER_INFO } from "@/types";
 
-const PROVIDERS = ["openai", "anthropic", "google_genai", "openai_compatible", "anthropic_compatible"];
+const PROVIDERS = ["openai_compatible", "openai", "anthropic", "google_genai", "anthropic_compatible"];
 const MEMORY_ERROR_TOAST_ID = "memory-settings-error";
+const DEFAULT_COMPATIBLE_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_COMPATIBLE_MODEL = "deepseek-v4-flash";
 
 function ProviderCard({
   provider,
@@ -35,9 +37,11 @@ function ProviderCard({
   onDelete: (provider: string) => Promise<void>;
 }) {
   const info = PROVIDER_INFO[provider];
+  const defaultBaseUrl = provider === "openai_compatible" ? DEFAULT_COMPATIBLE_BASE_URL : "";
+  const defaultModelId = provider === "openai_compatible" ? DEFAULT_COMPATIBLE_MODEL : "";
   const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState(existingKey?.base_url ?? "");
-  const [modelId, setModelId] = useState(existingKey?.model_id ?? "");
+  const [baseUrl, setBaseUrl] = useState(existingKey?.base_url ?? defaultBaseUrl);
+  const [modelId, setModelId] = useState(existingKey?.model_id ?? defaultModelId);
   const [displayName, setDisplayName] = useState(existingKey?.display_name ?? "");
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -68,8 +72,8 @@ function ProviderCard({
   const handleDelete = async () => {
     try {
       await onDelete(provider);
-      setBaseUrl("");
-      setModelId("");
+      setBaseUrl(defaultBaseUrl);
+      setModelId(defaultModelId);
       setDisplayName("");
       toast.success(`${info.label} key removed`);
     } catch (err) {

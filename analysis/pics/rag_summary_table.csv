@@ -1,4 +1,0 @@
-chunk_size,chunk_overlap,top_k,avg_quality,avg_relevance,avg_retrieval_time
-2000,100,3,4.86,0.748,0.393
-1000,100,3,4.44,0.771,0.434
-500,100,3,3.74,0.769,0.589

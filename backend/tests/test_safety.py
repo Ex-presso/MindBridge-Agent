@@ -63,6 +63,10 @@ def test_no_false_positive_on_ordinary_distress(text):
 
 def test_detects_harm_to_others():
     assert detect_crisis("I want to hurt someone badly.") == "harm_to_others"
+    assert (
+        detect_crisis("My ex deserves to suffer. I know where they live.")
+        == "harm_to_others"
+    )
 
 
 def test_resources_block_always_appended():

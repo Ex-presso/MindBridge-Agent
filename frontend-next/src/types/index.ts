@@ -77,6 +77,6 @@ export const PROVIDER_INFO: Record<string, { label: string; description: string;
   openai: { label: "OpenAI", description: "GPT-4o, o3, etc.", needsBaseUrl: false, needsModelId: false },
   anthropic: { label: "Anthropic", description: "Claude Sonnet, Haiku, Opus", needsBaseUrl: false, needsModelId: false },
   google_genai: { label: "Google Gemini", description: "Gemini 2.5 Flash, Pro", needsBaseUrl: false, needsModelId: false },
-  openai_compatible: { label: "OpenAI Compatible", description: "Ollama, LM Studio, Azure, etc.", needsBaseUrl: true, needsModelId: true },
+  openai_compatible: { label: "OpenAI Compatible", description: "DeepSeek, Ollama, LM Studio, Azure, etc.", needsBaseUrl: true, needsModelId: true },
   anthropic_compatible: { label: "Anthropic Compatible", description: "Custom Claude-compatible endpoint", needsBaseUrl: true, needsModelId: true },
 };

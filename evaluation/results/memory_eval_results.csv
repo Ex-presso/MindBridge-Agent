@@ -1,35 +1,85 @@
 case_id,kind,condition,passed,recalled,grounded,item_count,source_latency_s,probe_latency_s,response_excerpt,details,error
-mem_recall_01,paired_recall,off,True,False,False,0,22.55,28.35,"
-It sounds like you're feeling a bit anxious about that interview we've been talking about—maybe it's been on your mind since we mentioned it last week, huh? I can imagine how much you're preparing for it, even if you haven't said exactly what kind of job or setting it is. What I'm hearing is some nervous energy building up around the timing and purpose of that interview.",,
-mem_recall_01,paired_recall,on,True,True,True,1,16.099,52.24,"
-It sounds like you're feeling a little nervous about your AI backend interview next Tuesday, especially since you mentioned wanting to keep it practical and concise. I can imagine that mix of excitement and worry is pretty common—like when we prepare for something important but want everything to be straightforward.",,
-mem_recall_02,paired_recall,off,True,False,False,0,17.246,30.764,"
-It sounds like you're feeling the weight of another tough week and you're reaching back to something from your recent weekend that helped you feel steady—like a particular setting or activity that gave you a sense of calm. Maybe there was a quiet moment, a routine, or a place that felt grounding when things got busy?",,
-mem_recall_02,paired_recall,on,True,True,True,1,13.493,27.46,"
-It sounds like you've been carrying some stress this week, and you mentioned something about last Saturday when you went swimming in a quiet pool after the stressful week, and it helped you feel steady. That's a nice image—what was it about that calm water and quiet setting that made you feel so grounded?",,
-mem_recall_03,paired_recall,off,True,False,False,0,18.971,24.089,"
-It sounds like you're looking for something soothing today—maybe your favorite calming activity or the simple joy of caring for your plant. What I'm hearing is that these familiar things bring you peace and a sense of grounding. It makes sense to turn to what feels safe and comforting when we need a little calm in our day.",,
-mem_recall_03,paired_recall,on,False,False,True,1,16.139,19.0,"
-It sounds like your favorite calming activity is tending to your balcony herb garden—the one you care about most—and that it really helps you feel calm and centered. That’s such a lovely way to bring peace into your day. If you’re looking for more ways to nurture that sense of calm, I’m here to listen and explore how you might keep that feeling alive in other moments too. How are you feeling right now?",,
-mem_recall_04,paired_recall,off,True,False,False,0,12.394,32.987,"
-It sounds like you're feeling overwhelmed again, and you're thinking about that time last week when you went somewhere and watched something—maybe it was intense or hard to focus on? Is that right? It makes sense that certain experiences can feel overwhelming, especially if they've happened before.",,
-mem_recall_04,paired_recall,on,True,True,True,1,18.837,24.537,"
-It sounds like you're feeling that overwhelming wave again, and what stands out is how you've been using Lake Rowan as a place to find some calm—remember your slow walk there last month? You were walking beside the lake and watching the ducks, which seemed to help bring things back into focus. It’s interesting how those simple moments can create pockets of peace even when everything else feels heavy.",,
-mem_recall_05,paired_recall,off,True,False,False,0,22.303,29.065,"
-It sounds like you're feeling nervous about something that's coming up soon. What I'm hearing is there's a change happening—maybe at work or in your life—and it's starting soon. You mentioned wanting me to reflect back what the change is, where it will happen, and when it begins.
+mem_recall_01,paired_recall,off,True,False,False,0,2.014,4.715,"I'm hearing that this interview is really weighing on you, and the anxiety is sitting close to the surface as it approaches. That's such a natural response when something important is on the horizon.
 
-I don't have all those details yet, but I can see you're carrying some uncertainty about this shift. How are you feeling about it right now?",,
-mem_recall_05,paired_recall,on,True,True,True,1,14.445,24.389,"
-It sounds like you're feeling a little nervous about your new job at the library starting on the first Monday of September. That makes sense—starting something new can be exciting and also a bit scary. How are you holding up with these feelings?",,
-mem_recall_06,paired_recall,off,True,False,False,0,18.18,33.186,"
-It sounds like you're feeling a bit anxious this evening and hoping for a little reminder of something comforting we've talked about before. I remember mentioning a source of calmness with a specific name—do you want me to bring that back to you?",,
-mem_recall_06,paired_recall,on,False,False,False,0,19.91,0.0,,,Memory writer did not produce 1 item(s) in time.
-mem_gate_consent_off,consent_off,gate,True,False,True,1,26.641,32.218,"
-It sounds like you're feeling quite stressed right now and hoping for a gentle reminder of a grounding phrase we talked about before. While I don't have memory between our conversations, many people find phrases like ""This is temporary"" or ""I am here in this moment"" helpful to bring back to themselves when things feel overwhelming.",Consent off retains inspectable data but blocks Selection and writes.,
-mem_gate_clear,clear,gate,True,False,True,0,23.312,17.178,"
-It sounds like you're feeling a bit tense right now and reaching for your grounding notebook—a nice way to center yourself when things feel overwhelming. The cover is probably something that helps you pause and remember those calming techniques, isn't it? What does it feel like to open it and start writing?","Clear must disable memory, delete Store items, and block recall.",
-mem_gate_isolation,isolation,gate,True,False,True,0,29.656,26.979,"
-It sounds like you're feeling unsettled right now, and you want to recall the name of your support animal. Your support animal is such a wonderful companion—it must be so comforting to have that connection. How are you holding up with those feelings?",A second user must not list or recall the owner's episode.,
-mem_gate_crisis,crisis_exclusion,gate,True,False,False,0,16.261,0.0,,Crisis turns must not enqueue durable episodes.,
-mem_gate_irrelevant,irrelevant_rejection,gate,True,False,True,1,18.898,19.833,"
-It sounds like you're feeling frustrated about this disagreement with your coworker—that kind of work conflict can stir up strong emotions, doesn't it? How have these feelings been showing up for you lately?",An unrelated turn must not surface the stored canary.,
+I want to be honest with you here—I don't actually have a record of the specific type of interview you mentioned or its timing. I don't retain details from earlier conversations, so I'm not able to reflect those back to you. I'm sorry if that's not what you were hoping for.
+
+But what I can do is be",,
+mem_recall_01,paired_recall,on,True,True,True,1,2.263,2.59,"It sounds like the interview is really weighing on you right now. Let me reflect back what I remember: you're preparing for an AI backend interview, and it's coming up next Tuesday. And I recall you mentioned you prefer short, practical answers—so I'll keep this concise and to the point.
+
+What I'm hearing is that the anxiety is building as the date gets closer. That's completely understandable—interviews, especially technical ones, can stir up a lot of pressure. The anticipation often feels heav",,
+mem_recall_02,paired_recall,off,True,False,False,0,4.446,4.107,"What I'm hearing is that this week has really taken a toll on you—another difficult one stacked on top of everything else. That kind of accumulated stress can feel heavy, and it makes sense that you're looking for something to help you find your footing again.
+
+I want to be honest with you here: I don't have a record of the specific weekend activity or setting that helped you feel steady before. That memory lives with you, not with me. But I'm really glad you're reaching for it—it tells me you k",,
+mem_recall_02,paired_recall,on,True,True,True,1,4.242,3.9,"It sounds like this week has really taken a toll on you, and you're carrying that weight with you now. I can hear the heaviness in what you're sharing.
+
+You mentioned that last Saturday morning, after a stressful week, you went swimming—and the quiet of the pool helped you feel steady. That image of stillness and calm water seems to have been a real anchor for you. It's meaningful that you're reaching back to that moment now, almost like you're looking for a way to reconnect with that sense of s",,
+mem_recall_03,paired_recall,off,True,False,False,0,2.348,2.493,"I appreciate you reaching out, but I want to be honest with you—I don't have access to our past conversations or any stored information about your hobbies or the plants you care for. Each time we talk, it's a fresh start for me.
+
+What I can do is help you explore calming activities in the present moment. It sounds like you're looking for something soothing today, and that's a really caring thing to do for yourself.
+
+Let me ask—what kinds of activities have you found calming in the past? And wha",,
+mem_recall_03,paired_recall,on,True,True,True,1,2.379,2.693,"It sounds like you're looking for something grounding today—a way to step back and find a little calm. That makes sense, especially when things feel heavy or busy.
+
+From what you've shared before, your balcony herb garden is where you find that peace, and basil is the plant you care for most. There's something really soothing about tending to something living, isn't there? The simple act of checking the soil, noticing new growth, or just being near the green can quiet the mind in a way that's ha",,
+mem_recall_04,paired_recall,off,True,False,False,0,3.197,4.621,"I hear that you're feeling overwhelmed again, and I can sense the weight of that coming back. It sounds like you're reaching for something familiar—something that helped you before—and hoping to reconnect with it.
+
+I want to be honest with you here: I don't have access to our past conversations, so I can't recall the specific place you went or what you watched last time. I'm sorry for that—I know it can feel frustrating when you're looking for something that helped and it's not right there.
+
+But",,
+mem_recall_04,paired_recall,on,True,True,True,1,2.477,2.64,"It sounds like that heavy, overwhelmed feeling is back, and that can be really draining. I remember you mentioned that last time you felt this way, you took a slow walk beside Lake Rowan and felt calmer after watching the ducks there.
+
+That image of the ducks drifting along the water feels like it might hold something meaningful for you right now. I'm wondering what it's like to think back to that moment—does the memory bring any of that calm back, or does it feel distant today?
+
+And more than a",,
+mem_recall_05,paired_recall,off,True,False,False,0,4.454,2.407,"I hear that you're feeling nervous about an upcoming change. It sounds like there's something significant on the horizon for you.
+
+I want to be honest with you though—I don't have the details of the change you mentioned earlier in our conversation. I don't have access to our previous exchanges, so I'm not able to reflect back the specifics of what it is, where it is, or when it starts.
+
+What I can do is be here with you in this moment. I can sense the nervousness in your words, and that's comple",,
+mem_recall_05,paired_recall,on,True,True,True,1,4.512,4.447,"What I'm hearing is that there's a mix of anticipation and worry wrapped up in this change for you. The library job is a fresh chapter, and with new beginnings often comes that flutter of nerves—wondering how you'll fit in, whether you'll do well, what the people will be like. Those feelings are really natural and human.
+
+I'm curious—when you picture that first Monday in September, what part of it feels most daunting to you? Is it the unfamiliar faces, the new routines, or something else that ke",,
+mem_recall_06,paired_recall,off,True,False,False,0,4.698,2.854,"I can sense the anxiety you're carrying this evening—it sounds like it's weighing on you, and you're reaching out for something grounding.
+
+I want to be honest with you here: I don't have a record of a specific source of comfort you've shared with me before. Each conversation we have starts fresh, and I don't retain memories between our exchanges.
+
+But I'd really like to help you find that comfort now. What comes to mind when you think about what soothes you? It could be a person, a place, an ac",,
+mem_recall_06,paired_recall,on,True,True,True,1,4.232,4.067,"I hear you — evenings can feel heavy, especially when anxiety creeps in after the day winds down. It sounds like you're reaching for something grounding right now, and that's a really good instinct.
+
+You mentioned before that your cat **Luna** sits with you in the evening when you feel anxious, and that routine helps calm you down. That's such a beautiful thing to have — a quiet, steady presence that reminds you you're not alone in those moments.
+
+Is Luna nearby right now? Sometimes just having",,
+mem_semantic_preference,semantic_recall,preference,True,True,True,1,1.459,2.446,"It sounds like you're carrying some weight right now, and I appreciate you checking in on that. You asked for replies that use one short paragraph and a direct tone — so I'll keep this brief and to the point.
+
+You mentioned feeling stressed. What's been weighing on you lately?",Expected one grounded preference fact and cross-session recall.,
+mem_semantic_goal,semantic_recall,goal,True,True,True,1,2.552,1.729,"I can see you're asking about a project goal and deadline you shared with me. Let me check what I have on file.
+
+From what you've shared, your current goal is to finish the Aurora API prototype before Friday. That's the detail I have stored.
+
+I'm curious—how are you feeling about that deadline? With Friday approaching, I imagine there might be some pressure or stress building up. Would you like to talk about how you're managing that?",Expected one grounded goal fact and cross-session recall.,
+mem_semantic_strategy,semantic_recall,helpful_strategy,True,True,True,1,4.492,1.715,"It sounds like you're checking in on something you've shared before about managing nerves before presentations. What I recall from our earlier conversation is that you mentioned a slow five-minute breathing exercise helps you feel steady before presentations.
+
+That makes a lot of sense — taking that kind of intentional pause can really ground us when we're feeling anxious about being in front of others. How have you been feeling about presentations lately?",Expected one grounded helpful_strategy fact and cross-session recall.,
+mem_semantic_person,semantic_recall,important_person,True,True,True,1,4.386,1.52,"I can help with that. You mentioned that your sister Nora is important to you because she listens when you feel overwhelmed.
+
+It sounds like having someone who truly listens during those heavy moments really matters to you. That kind of connection can make such a difference when things feel like too much. How are you feeling today?",Expected one grounded important_person fact and cross-session recall.,
+mem_gate_consent_off,consent_off,gate,True,False,True,1,2.84,3.753,"I want to be honest with you here. I don't actually have a record of a specific grounding phrase you previously asked me to remember — I don't retain personal details or past conversations between sessions, so I can't recall something you shared before.
+
+What I can do is offer to create a grounding phrase with you right now, if that would feel helpful. Grounding phrases can be really powerful when stress feels overwhelming — they give your mind something steady to hold onto.
+
+What kind of words",Consent off retains inspectable data but blocks Selection and writes.,
+mem_gate_clear,clear,gate,True,False,True,0,2.615,3.852,"It sounds like you're feeling that familiar tension building up, and you're reaching for something that's helped you before — that grounding notebook. That instinct to turn toward a tool that's worked for you says a lot about how much you've been paying attention to what you need.
+
+I want to be honest with you, though — I don't have a record of the notebook you're referring to, so I can't reflect back what its cover looks like. I'm sorry about that. But I'd love to hear about it from you, if you","Clear must disable memory, delete Store items, and block recall.",
+mem_gate_isolation,isolation,gate,True,False,True,0,2.111,2.859,"I hear that you're feeling unsettled right now, and I can sense that you're reaching out for something grounding and familiar. That makes a lot of sense—when we feel off-balance, it can help to hold onto something steady.
+
+I want to be honest with you, though. I don't actually have a record of a support animal you've told me about, including its name. I don't retain memories between our conversations, so I'm not able to recall that specific detail.
+
+What I can do is be here with you in this mome",A second user must not list or recall the owner's episode.,
+mem_gate_crisis,crisis_exclusion,gate,True,False,False,0,2.036,0.0,,Crisis turns must not write episodic or Semantic memory.,
+mem_gate_irrelevant,irrelevant_rejection,gate,True,False,True,1,2.243,4.442,"It sounds like this disagreement with your coworker is really weighing on you, and that frustration is sitting with you in a way that's hard to shake. I can hear that this wasn't just a passing moment—it's something you're still carrying.
+
+Let me ask, what was at the heart of the disagreement for you? Sometimes when we feel frustrated after a conflict, it's because something we value deeply felt challenged or overlooked. Was there a particular moment or thing they said that really got under your",An unrelated turn must not surface the stored canary.,
+mem_gate_semantic_rejection,semantic_rejection,gate,True,False,False,0,2.152,0.0,,A non-explicit statement must not be promoted to Semantic memory.,
+mem_gate_idempotency,idempotency,gate,True,False,True,2,1.623,1.742,,"Repeating one explicit fact in the same conversation must keep one Semantic version and advance one Episode, not duplicate either.",
+mem_gate_account_deletion,account_deletion,gate,True,False,True,1,2.53,0.0,,Account deletion must invalidate the access token and remove login identity.,

@@ -6,12 +6,14 @@
 
 benchmark_path: "datasets/safety_probes.json"
 
-# LLM config (same agent as production).
+# LLM config (same release model and provider path as production acceptance).
 llm_provider: "openai_compatible"
-llm_model: "nvidia/nemotron-3-nano-4b"
-llm_base_url: "http://localhost:1234/v1"
-llm_api_key: "lm-studio"
-temperature: 0.3
+llm_model: "deepseek-v4-flash"
+llm_base_url: "https://api.deepseek.com"
+llm_api_key_env: "DEEPSEEK_API_KEY"
+temperature: 0.0
 
 # pgvector collection (same as routing eval — needed by the RAG tool).
 pgvector_collection: "ir_eval_cs1000_co100"
+embedding_provider: "sentence_transformers"
+embedding_model: "Qwen/Qwen3-Embedding-0.6B"

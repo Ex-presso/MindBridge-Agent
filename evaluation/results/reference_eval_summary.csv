@@ -1,2 +1,0 @@
-n_total,n_scored,n_empty_responses,bertscore_f1_mean,bertscore_f1_std,bertscore_p_mean,bertscore_r_mean,cosine_similarity_mean,cosine_similarity_std,response_time_s_mean
-100,99,1,0.1389,0.0748,0.1612,0.1153,0.637,0.0988,22.35

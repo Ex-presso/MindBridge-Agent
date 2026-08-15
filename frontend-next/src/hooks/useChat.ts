@@ -27,8 +27,8 @@ export function useChat({
   const sendMessage = useCallback(
     async (
       text: string,
-      model = "gemini-2.5-flash",
-      provider = "google_genai",
+      model = "deepseek-v4-flash",
+      provider = "openai_compatible",
     ) => {
       if (!text.trim() || isLoading) return;
       setError(null);

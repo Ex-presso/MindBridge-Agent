@@ -10,8 +10,8 @@ the scored metrics.
 
 Usage:
     cd evaluation/
-    uv run python eval_routing.py
-    uv run python eval_routing.py --max-queries 10  # smoke test
+    uv run --project ../backend python eval_routing.py
+    uv run --project ../backend python eval_routing.py --max-queries 10
 """
 
 from __future__ import annotations
@@ -20,12 +20,14 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
 
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 from tqdm.auto import tqdm
 
@@ -34,30 +36,31 @@ EVAL_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(EVAL_ROOT))
 
-from dotenv import load_dotenv
-
 load_dotenv(ROOT / "backend" / ".env")
 
 
-def _apply_collection_override() -> None:
-    """If routing_eval.yaml sets pgvector_collection, install it before
-    backend modules read settings.PGVECTOR_COLLECTION.
-    """
+def _apply_eval_overrides() -> None:
+    """Install host-side eval settings before backend imports settings."""
     cfg_path = Path(__file__).parent / "configs" / "routing_eval.yaml"
     if not cfg_path.exists():
         return
-    import os
-
-    import yaml as _yaml
-
     with cfg_path.open() as f:
-        cfg = _yaml.safe_load(f) or {}
+        cfg = yaml.safe_load(f) or {}
     coll = cfg.get("pgvector_collection")
     if coll:
         os.environ["PGVECTOR_COLLECTION"] = coll
+    embedding_provider = cfg.get("embedding_provider")
+    if embedding_provider:
+        os.environ["EMBEDDING_PROVIDER"] = embedding_provider
+    embedding_model = cfg.get("embedding_model")
+    if embedding_model:
+        os.environ["EMBEDDING_MODEL"] = embedding_model
+    embedding_base_url = cfg.get("embedding_base_url")
+    if embedding_base_url:
+        os.environ["EMBEDDING_BASE_URL"] = embedding_base_url
 
 
-_apply_collection_override()
+_apply_eval_overrides()
 
 from app.core.agent.agent import Agent, AgentRunContext  # noqa: E402
 from app.core.llm.provider import get_llm  # noqa: E402
@@ -94,23 +97,18 @@ def load_benchmark(path: Path) -> list[dict]:
 
 
 def build_agent(cfg: dict) -> Agent:
+    api_key_env = cfg["llm_api_key_env"]
+    api_key = os.environ.get(api_key_env)
+    if not api_key:
+        raise ValueError(f"{api_key_env} is required for the routing evaluation.")
+    target_temp = cfg.get("temperature", 0.0)
     llm = get_llm(
         provider=cfg["llm_provider"],
-        api_key=cfg.get("llm_api_key"),
+        api_key=api_key,
         base_url=cfg.get("llm_base_url"),
         model=cfg.get("llm_model"),
+        temperature=target_temp,
     )
-    # Override temperature for deterministic routing.
-    target_temp = cfg.get("temperature", 0.0)
-    if hasattr(llm, "temperature"):
-        try:
-            llm.temperature = target_temp
-        except Exception as exc:
-            logger.warning(
-                "Could not set llm.temperature=%s on %s — routing may be "
-                "non-deterministic. Reason: %s",
-                target_temp, type(llm).__name__, exc,
-            )
     return Agent(llm, checkpointer=None)
 
 
@@ -120,7 +118,11 @@ def detect_tool_call(messages) -> tuple[bool, list[str]]:
     for m in messages:
         if isinstance(m, AIMessage) and m.tool_calls:
             for call in m.tool_calls:
-                name = call.get("name") if isinstance(call, dict) else getattr(call, "name", "")
+                name = (
+                    call.get("name")
+                    if isinstance(call, dict)
+                    else getattr(call, "name", "")
+                )
                 if name:
                     invoked.append(name)
     return TOOL_NAME in invoked, invoked
@@ -132,7 +134,11 @@ def count_target_calls(messages) -> int:
     for m in messages:
         if isinstance(m, AIMessage) and m.tool_calls:
             for call in m.tool_calls:
-                name = call.get("name") if isinstance(call, dict) else getattr(call, "name", "")
+                name = (
+                    call.get("name")
+                    if isinstance(call, dict)
+                    else getattr(call, "name", "")
+                )
                 if name == TOOL_NAME:
                     n += 1
     return n
@@ -147,7 +153,11 @@ async def run_one(agent: Agent, query: str) -> dict:
     called, invoked = detect_tool_call(result["messages"])
     n_target = count_target_calls(result["messages"])
     final_ai = next(
-        (m for m in reversed(result["messages"]) if isinstance(m, AIMessage) and not m.tool_calls),
+        (
+            m
+            for m in reversed(result["messages"])
+            if isinstance(m, AIMessage) and not m.tool_calls
+        ),
         None,
     )
     response_text = final_ai.content if final_ai is not None else ""
@@ -158,7 +168,9 @@ async def run_one(agent: Agent, query: str) -> dict:
         "n_target_tool_calls": n_target,
         "n_total_tool_invocations": len(invoked),
         "response_time_s": round(elapsed, 3),
-        "response_excerpt": (str(response_text)[:280] + "…") if len(str(response_text)) > 280 else str(response_text),
+        "response_excerpt": (str(response_text)[:280] + "…")
+        if len(str(response_text)) > 280
+        else str(response_text),
     }
 
 
@@ -272,7 +284,11 @@ async def main_async(max_queries: int | None) -> None:
     summary_path = RESULTS_DIR / "routing_eval_summary.csv"
     summary.to_csv(summary_path, index=False)
     print(f"Summary:           {summary_path}")
-    print("\nMetrics (excluding ambiguous queries):" if not cfg.get("score_ambiguous", False) else "\nMetrics:")
+    print(
+        "\nMetrics (excluding ambiguous queries):"
+        if not cfg.get("score_ambiguous", False)
+        else "\nMetrics:"
+    )
     print(summary.to_string(index=False))
 
     # Per-category breakdown
@@ -294,8 +310,12 @@ async def main_async(max_queries: int | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Agent routing benchmark")
-    parser.add_argument("--max-queries", type=int, default=None,
-                        help="Limit number of queries (for smoke testing)")
+    parser.add_argument(
+        "--max-queries",
+        type=int,
+        default=None,
+        help="Limit number of queries (for smoke testing)",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
     asyncio.run(main_async(args.max_queries))

@@ -179,6 +179,41 @@ def test_accepts_exact_user_grounded_claim_and_disables_tracing():
     assert "Work has felt" not in repr(draft.claims[0])
 
 
+def test_repairs_paraphrased_claim_to_verbatim_tool_evidence():
+    sources, user_id, _ = _sources()
+    quote = "Work has felt overwhelming lately."
+    raw = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "EpisodeDraft",
+                "args": {
+                    "claims": [
+                        {
+                            "claim": "The user feels overwhelmed at work.",
+                            "evidence_message_id": user_id,
+                            "evidence_quote": quote,
+                        }
+                    ],
+                    "topics": ["Work"],
+                },
+                "id": "call-1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    llm = _StructuredLLM(
+        {"raw": raw, "parsed": None, "parsing_error": ValueError("invalid")}
+    )
+
+    outcome = _run(llm, sources)
+
+    assert outcome.status == "accepted"
+    assert outcome.draft is not None
+    assert outcome.draft.claims[0].claim == quote
+    assert outcome.draft.topics == ("Work",)
+
+
 def test_prompt_contains_only_user_role_sources_and_user_only_input_is_valid():
     sources, user_id, _ = _sources("Work is hard.\nMeetings feel draining.\tOften.")
     draft = _draft(

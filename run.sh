@@ -1,18 +1,11 @@
 #!/usr/bin/env bash
-# Evaluation suite shortcuts. Needs PostgreSQL (pgvector) + LM Studio up.
-# See docs/EVALUATION.md for the full methodology.
+set -euo pipefail
 
-# Smoke test — 3 queries per layer
-cd evaluation && uv run python run_all.py --quick
+# Current release evaluation. See docs/EVALUATION.md for prerequisites and scope.
+cd "$(dirname "$0")/evaluation"
 
-# Full run — all five layers + figures
-cd evaluation && uv run python run_all.py
+# Frozen routing and safety suites.
+uv run --project ../backend python run_all.py
 
-# (Re)build IR indexes before the retrieval layer
-cd evaluation && uv run python run_all.py --build
-
-# Skip specific layers
-cd evaluation && uv run python run_all.py --skip prompting safety
-
-# Only regenerate figures from existing result CSVs
-cd evaluation && uv run python ../analysis/analyze.py
+# Live API, outbox, worker, Store, and cross-conversation memory acceptance.
+uv run --project ../backend python eval_memory.py

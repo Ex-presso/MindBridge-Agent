@@ -1,4 +1,5 @@
 """Request schema validation."""
+
 import pytest
 from pydantic import ValidationError
 
@@ -9,7 +10,8 @@ def test_defaults():
     req = SessionChatRequest(message="hi")
     assert req.stream is True
     assert req.conversation_id is None
-    assert req.provider == "google_genai"
+    assert req.model == "deepseek-v4-flash"
+    assert req.provider == "openai_compatible"
 
 
 def test_message_length_cap():
