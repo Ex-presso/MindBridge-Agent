@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import logging
 import math
@@ -31,6 +32,13 @@ EpisodeSelectionStatus = Literal[
     "guard_unavailable",
     "guard_failed",
 ]
+
+# Semantic facts are not vector indexed, so the Store returns them in an order
+# it does not define. Reading a multiple of the render budget lets Selection
+# apply its own deterministic recency order, and keeps superseded or stale-epoch
+# values from silently consuming slots that valid facts should have had.
+_SEMANTIC_OVERFETCH_FACTOR = 4
+_SEMANTIC_OVERFETCH_CEILING = 50
 
 _DEFAULT_SEMANTIC_ITEM_CHAR_LIMIT = 280
 _DEFAULT_EPISODE_SUMMARY_CHAR_LIMIT = 800
@@ -162,13 +170,39 @@ def _has_vector_index(store: Any) -> bool:
     return isinstance(dims, int) and not isinstance(dims, bool) and dims > 0
 
 
+def _recency(value: str | None) -> float | None:
+    """Return a comparable instant, or None when the value is unusable."""
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    try:
+        return moment.timestamp()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _parse_semantic_items(
     items: Sequence[Any],
     *,
     item_char_limit: int,
     expected_data_epoch: int,
+    limit: int,
 ) -> tuple[SemanticMemory, ...]:
-    selected: list[SemanticMemory] = []
+    """Validate, order by recency, then trim to the render budget.
+
+    The Store gives no ordering guarantee for an unindexed namespace, so
+    without this a user holding more facts than the budget would get an
+    arbitrary subset. Ordering by the last write makes the rendered profile
+    "most recently restated facts win", which is deterministic and
+    explainable; ties break on content so the result never depends on the
+    order the Store happened to return.
+    """
+    scored: list[tuple[bool, float, str, SemanticMemory]] = []
     for item in items:
         value = getattr(item, "value", None)
         if not isinstance(value, Mapping):
@@ -185,8 +219,17 @@ def _parse_semantic_items(
             continue
         if len(parsed.content) > item_char_limit:
             continue
-        selected.append(SemanticMemory(kind=parsed.kind, content=parsed.content))
-    return tuple(selected)
+        recency = _recency(parsed.updated_at) or _recency(parsed.created_at)
+        scored.append(
+            (
+                recency is not None,
+                recency or 0.0,
+                parsed.content,
+                SemanticMemory(kind=parsed.kind, content=parsed.content),
+            )
+        )
+    scored.sort(key=lambda entry: entry[:3], reverse=True)
+    return tuple(entry[3] for entry in scored[:limit])
 
 
 def _parse_episode_items(
@@ -291,7 +334,10 @@ async def select_memory(
         try:
             raw_semantic = await store.asearch(
                 semantic_namespace,
-                limit=semantic_limit,
+                limit=min(
+                    semantic_limit * _SEMANTIC_OVERFETCH_FACTOR,
+                    _SEMANTIC_OVERFETCH_CEILING,
+                ),
                 offset=0,
                 refresh_ttl=False,
             )
@@ -308,6 +354,7 @@ async def select_memory(
         semantic_items,
         item_char_limit=semantic_item_char_limit,
         expected_data_epoch=expected_data_epoch,
+        limit=semantic_limit,
     )
 
     if not episode_limit or not normalized_query:

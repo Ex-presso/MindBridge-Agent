@@ -146,7 +146,8 @@ def test_selects_only_exact_user_namespace_and_excludes_current_episode():
     assert store.calls == [
         (
             ("memory", str(user_id), "semantic"),
-            {"limit": 8, "offset": 0, "refresh_ttl": False},
+            # Over-fetched: Selection orders and trims the 8 it renders.
+            {"limit": 32, "offset": 0, "refresh_ttl": False},
         ),
         (
             ("memory", str(user_id), "episodes"),
@@ -559,3 +560,117 @@ def test_renderer_rejects_invalid_budgets(kwargs, message):
 def test_selection_rejects_invalid_budgets(kwargs, message):
     with pytest.raises(ValueError, match=message):
         _run(select_memory(_Store(), uuid.uuid4(), "query", **kwargs))
+
+
+def _dated_semantic(content, updated_at=None, **overrides):
+    return _semantic_value(
+        content=content,
+        updated_at=updated_at,
+        **overrides,
+    )
+
+
+def test_semantic_facts_are_ordered_by_recency_before_trimming():
+    # The Store gives no ordering guarantee, so the oldest fact is returned
+    # first here. Selection must still render the two most recent ones.
+    user_id = uuid.uuid4()
+    store = _Store(
+        semantic=[
+            _item(user_id, "semantic", "a", _dated_semantic(
+                "Oldest fact", "2026-01-01T00:00:00+00:00")),
+            _item(user_id, "semantic", "b", _dated_semantic(
+                "Newest fact", "2026-03-01T00:00:00+00:00")),
+            _item(user_id, "semantic", "c", _dated_semantic(
+                "Middle fact", "2026-02-01T00:00:00+00:00")),
+        ],
+    )
+
+    selection = _run(
+        select_memory(store, user_id, "query", semantic_limit=2, episode_limit=0)
+    )
+
+    assert [fact.content for fact in selection.semantic] == [
+        "Newest fact",
+        "Middle fact",
+    ]
+
+
+def test_semantic_selection_falls_back_to_created_at_then_content():
+    user_id = uuid.uuid4()
+    store = _Store(
+        semantic=[
+            _item(user_id, "semantic", "a", _dated_semantic("Undated B")),
+            _item(user_id, "semantic", "b", _dated_semantic(
+                "Created only", created_at="2026-05-01T00:00:00+00:00")),
+            _item(user_id, "semantic", "c", _dated_semantic("Undated A")),
+        ],
+    )
+
+    selection = _run(
+        select_memory(store, user_id, "query", semantic_limit=3, episode_limit=0)
+    )
+
+    # A timestamped fact outranks undated ones, which then order by content so
+    # the result never depends on the sequence the Store happened to return.
+    assert [fact.content for fact in selection.semantic] == [
+        "Created only",
+        "Undated B",
+        "Undated A",
+    ]
+
+
+def test_unusable_timestamps_do_not_break_selection():
+    user_id = uuid.uuid4()
+    store = _Store(
+        semantic=[
+            _item(user_id, "semantic", "a", _dated_semantic(
+                "Malformed date", "not-a-timestamp")),
+            _item(user_id, "semantic", "b", _dated_semantic(
+                "Valid date", "2026-03-01T00:00:00+00:00")),
+        ],
+    )
+
+    selection = _run(
+        select_memory(store, user_id, "query", semantic_limit=2, episode_limit=0)
+    )
+
+    assert [fact.content for fact in selection.semantic] == [
+        "Valid date",
+        "Malformed date",
+    ]
+
+
+def test_stale_items_do_not_consume_the_render_budget():
+    # Regression: the Store used to be asked for exactly the render budget, so
+    # superseded or stale-epoch values silently displaced valid facts.
+    user_id = uuid.uuid4()
+    store = _Store(
+        semantic=[
+            _item(user_id, "semantic", "a", _dated_semantic(
+                "Superseded", "2026-04-01T00:00:00+00:00", status="superseded")),
+            _item(user_id, "semantic", "b", _dated_semantic(
+                "Wrong epoch", "2026-04-01T00:00:00+00:00", data_epoch=9)),
+            _item(user_id, "semantic", "c", _dated_semantic(
+                "Valid one", "2026-01-01T00:00:00+00:00")),
+            _item(user_id, "semantic", "d", _dated_semantic(
+                "Valid two", "2026-02-01T00:00:00+00:00")),
+        ],
+    )
+
+    selection = _run(
+        select_memory(store, user_id, "query", semantic_limit=2, episode_limit=0)
+    )
+
+    assert [fact.content for fact in selection.semantic] == [
+        "Valid two",
+        "Valid one",
+    ]
+
+
+def test_semantic_overfetch_is_bounded():
+    user_id = uuid.uuid4()
+    store = _Store(semantic=[])
+
+    _run(select_memory(store, user_id, "query", semantic_limit=100, episode_limit=0))
+
+    assert store.calls[0][1]["limit"] == 50

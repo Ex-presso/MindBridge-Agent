@@ -1,8 +1,9 @@
 # MindBridge Memory Architecture
 
 MindBridge separates conversation continuity from durable user memory. This
-document describes the implemented baseline and the planned long-term memory
-work. It is the public source of truth for memory-related code changes.
+document describes how the memory system is built, the invariants it holds, how
+it was verified, and what was deliberately left out of scope. It is the source
+of truth for memory-related code changes.
 
 ## Current state
 
@@ -235,12 +236,12 @@ Store write happens. Moving the side effect out of the graph adds retries,
 idempotency, deletion ordering, and crash recovery without putting memory policy
 under model control.
 
-The current milestone is the **C′ Extraction production slice**, not the
-complete three-layer endpoint. Episode Extraction and minimal semantic
-promotion are implemented; Consolidation and the single constrained
-`save_memory` hook remain open. Omitting that hook permanently would be a
-deliberate departure from the original full C′ definition and must be
-documented as such rather than silently relabeled.
+What is built is the **C′ Extraction production slice**, not the complete
+three-layer endpoint: Episode Extraction and minimal semantic promotion are
+implemented, while Consolidation and the constrained `save_memory` hook are
+scoped out for the reasons given under "Scope and future work". Omitting that
+hook is a deliberate departure from the original full C′ definition, recorded
+as such rather than silently relabeled.
 
 The crisis policy is intentionally stricter than the early sketch: a detected
 crisis does not merely skip one turn. It sets a sticky conversation tombstone,
@@ -396,11 +397,18 @@ Its content is legitimately re-derived from the current conversation, but the
 user asked to erase is never inherited into the new epoch.
 
 Facts use `index=False` because Selection reads this small allow-listed profile
-exactly. Selection therefore enumerates the namespace and truncates at
-`MEMORY_SELECT_SEMANTIC_LIMIT`, without ordering: once a user holds more facts
-than that limit, which ones are rendered is unspecified. Conflict resolution is
-likewise not guessed from wording. Both are the concrete motivation for the
-Consolidation milestone rather than incidental gaps.
+exactly rather than by similarity. An unindexed namespace has no Store-defined
+order, so Selection reads a bounded multiple of its render budget, drops
+superseded and stale-epoch values, orders what remains by last write, and only
+then trims to `MEMORY_SELECT_SEMANTIC_LIMIT`. The rendered profile is therefore
+the most recently restated facts, chosen deterministically: ties break on
+content so the result never depends on the order the Store happened to return,
+and invalid values can no longer consume slots that valid facts should have had.
+
+Recency is the ordering policy, not a relevance judgment. Superseding
+contradictory facts is deliberately not guessed from wording, which is the
+concrete motivation for the Consolidation work described under "Scope and
+future work".
 
 Episodic memory uses a dedicated rolling conversation synopsis. It must not
 reuse the working-memory compaction summary: short conversations often never
@@ -419,51 +427,6 @@ Legacy manual episode values containing only `summary/topics` remain visible to
 the privacy inspection and deletion APIs, but Selection now rejects them
 fail-closed. They must be re-derived with grounded `claims` and a
 `target_revision` before they can be recalled again.
-
-## Delivery order
-
-1. **Complete:** repair checkpoint deletion and compaction boundary handling.
-2. **Complete:** add consent, inspection, deletion, and schema foundations.
-3. **Complete:** add user-scoped, read-only Selection with manually seeded memories.
-4. **Complete:** add version/epoch gates, sticky crisis exclusion, durable outbox,
-   and retry-safe account cascade.
-5. **Complete:** add the pure structured episode draft, user-evidence grounding,
-   deterministic crisis/diagnosis/instruction filters, and sanitized failures.
-6. **Complete:** enqueue completed turns and add the leased worker, bounded
-   retries, relational source reload, and idempotent Episode upsert/deletion.
-7. **Complete:** accept the production paths in OrbStack through the public API
-   and browser: write/recall, consent-off, clear, crisis exclusion, account
-   deletion, and Store cleanup.
-8. **Complete:** freeze and run a 17-case multi-session memory on/off evaluation
-   covering grounded recall, irrelevant-memory rejection, user isolation,
-   consent, clear, and crisis filtering. The committed local-model snapshot is
-   4/6 memory-on recall, 0/6 memory-off recall, and 5/5 gates.
-9. **In progress:** the minimum explicit semantic writer is complete;
-   conflict-aware Consolidation remains before a complete three-layer claim.
-10. Implement the constrained C′ `save_memory` hook last; evaluation determines
-    its narrow scope and priority, not whether an unimplemented system may be
-    described as the complete C′ target.
-
-## Next delivery plan
-
-1. **Complete — production smoke:** `chat → outbox → worker → Store → later
-   recall`, consent-off, clear, crisis exclusion, and account deletion were
-   accepted through the running OrbStack stack.
-2. **Complete — frozen memory evaluation:** the repository now contains the
-   17-case dataset, live API runner, exact local-model configuration, row-level
-   results, and summary metrics. The two retained misses distinguish response
-   omission from bounded structured-Extraction failure.
-3. **Complete — minimal semantic layer:** fixed rules promote only explicit
-   preferences, goals, helpful strategies, and important people from reloaded
-   relational user text. Equivalent facts use deterministic keys; no diagnosis
-   is inferred and no second LLM call is introduced. Candidates are capped per
-   turn, promotion failures are isolated from the Episode write, and pre-clear
-   metadata is never inherited across a data epoch.
-4. **Next — deterministic Consolidation:** trigger by an application threshold or
-   cadence, not a model tool decision. Keep the scope limited to duplicates,
-   contradictions, and stale active records exposed by the evaluation.
-5. **Portfolio handoff:** add one Agent graph, one memory-write sequence diagram,
-   an evaluation table, reproducible commands, and resume/interview bullets.
 
 ## Running the PostgreSQL integration suite
 
@@ -487,64 +450,58 @@ creates and deletes its own `@example.com` accounts, and an autouse fixture
 removes accounts a previously failed run left behind so a re-run cannot lease
 an orphaned job and report a misleading result.
 
-## Human review handoff (updated 2026-08-14)
+## Verification
 
-The current review boundary adds production enqueue, the leased worker, and the
-Episode Store writer to the previously reviewed safety and Extraction core.
-Verify assistant/revision/job transactionality, User → Conversation → Job lock
-order, lease-token ownership, exact-revision/data-epoch gates, infinite privacy
-deletion retries, relational evidence matching, and Store idempotency.
+Memory behavior is verified at three levels, and the claims below are limited to
+what was actually observed.
 
-The current automated evidence is `319 passed, 6 skipped` for the default
-backend suite with `ruff check backend` clean under the default rules; CI now
-gates the backend on that baseline. The six opt-in PostgreSQL integration tests
-also pass against a migrated throwaway database: they confirm `READ COMMITTED`
-sessions, that a chat's `FOR KEY SHARE` barrier genuinely blocks credential
-replacement and account deletion in both orderings, that composite ownership
-foreign keys reject cross-user jobs and cascade correctly, and that concurrent
-workers lease disjoint jobs while a stale lease token cannot complete a
-re-leased job. The two leasing invariants were falsified before being trusted:
-removing `skip_locked` makes the second worker block until the test times out,
-and removing the `lease_until` equality check lets a superseded worker mark the
-job succeeded. The suite count reflects two cleanups: a
-`tests/conftest.py` baseline now pins `MEMORY_ENABLED` so a developer `.env`
-cannot change test behavior (a `.env` flip had silently broken nine chat-lock
-tests), and the English-only product-scope decision removed the Chinese
-detector/filter branches, their test cases, and bumped
-`CRISIS_DETECTOR_VERSION` to `4`. The LM Studio compatibility increment adds
-two focused regression tests, and a live LangChain schema probe recovers
-`{"status":"ok"}` without copying reasoning text.
+**Automated.** The default backend suite is `324 passed, 6 skipped`, with lint
+clean under the rule set CI pins. CI gates the backend on that baseline.
 
-The API/browser runtime boundary was accepted on 2026-08-14 with OrbStack,
-PostgreSQL/pgvector, and LM Studio. A disposable user completed
-chat → transactional outbox → leased worker → Episode Store, then a second
-conversation recalled both the interview topic and preferred response style.
-The UI observed Store counts 0 → 1 → 2 → 0 across writes and clear-and-disable;
-account deletion returned to login and the user row was physically absent.
-The frozen live API evaluation now extends that trace with six memory-on/off
-pairs and five privacy/Selection gates. With
-`nvidia/nemotron-3-nano-4b` and `text-embedding-mxbai-embed-large-v1`, it
-recorded 4/6 memory-on recalls, 0/6 memory-off recalls, 5/6 grounded writes,
-and 5/5 gates. The committed row-level evidence retains one response omission
-and one bounded structured-Extraction failure; see `docs/EVALUATION.md`.
+**Concurrency, against real PostgreSQL.** Six opt-in integration tests (see the
+section above for how to run them) confirm `READ COMMITTED` sessions; that a
+chat's `FOR KEY SHARE` barrier genuinely blocks credential replacement and
+account deletion in both orderings; that composite ownership foreign keys reject
+cross-user jobs and cascade correctly; and that concurrent workers lease
+disjoint jobs while a stale lease token cannot complete a re-leased job. The two
+leasing invariants were falsified before being trusted: removing `skip_locked`
+makes the second worker block until the test times out, and removing the
+`lease_until` equality check lets a superseded worker mark the job succeeded.
 
-The minimal semantic follow-up was also accepted through the public API on
-2026-08-14. One eligible turn completed with `attempts=0` and wrote an Episode
-plus an exact, source-attributed `preference`; clear removed both items and left
-the user namespace empty. The local 4B model did not repeat the preference
-details in its later reply, so this run is evidence for enqueue, semantic write,
-Selection availability, and deletion—not a claimed semantic-recall success.
-Two preceding 4B attempts exhausted their bounded retries with
-`invalid_output`; Extraction now fixes temperature at `0`, while the strict
-schema and three-attempt limit remain unchanged.
+**End to end, through the public API.** A disposable user completed
+chat → transactional outbox → leased worker → Episode Store, and a second
+conversation recalled both the earlier topic and the preferred response style.
+Stored-item counts moved 0 → 1 → 2 → 0 across writes and clear-and-disable;
+account deletion returned to login with the user row physically absent. The
+minimal semantic layer was accepted on the same path: one eligible turn wrote an
+Episode plus an exact, source-attributed `preference`, and clear removed both.
 
-Production writes occur only when both global and user consent are enabled and
-all fresh relational gates pass. Remaining work is conflict-aware
-Consolidation and the constrained C′ explicit-memory hook.
+**Frozen evaluation.** A 17-case live memory on/off benchmark recorded 4/6
+memory-on recalls, 0/6 memory-off recalls, 5/6 grounded writes, and 5/5
+privacy/Selection gates with `nvidia/nemotron-3-nano-4b` and
+`text-embedding-mxbai-embed-large-v1`. Row-level results are committed; see
+`docs/EVALUATION.md`. The two retained misses are kept rather than removed: one
+is a response omission and one a bounded structured-Extraction failure.
 
-`README.md` and this file are the tracked, authoritative documentation in the
-handoff commits. `docs/develop.md`, `docs/system_arch.md`, and
-`docs/memory_design.md` are intentionally excluded by the repository's existing
-`.gitignore`; the first two are synchronized local workspace references, while
-`memory_design.md` preserves the earlier design exploration rather than current
-implementation status.
+What this does **not** establish: the sample is small, and the local 4B model did
+not always restate remembered details in its reply. Recall lift is evidence that
+memory changes behavior, not that the system recalls reliably at scale.
+
+## Scope and future work
+
+Two parts of the complete C′ target are deliberately unbuilt rather than
+overlooked.
+
+**Conflict-aware Consolidation.** Deduplication is already handled by the
+deterministic key over kind and normalized content, so what remains is
+superseding contradictory facts and pruning stale ones. Both require either a
+second probabilistic call or brittle hand-written rules, and neither is
+justified at this scale: Selection renders the most recently written facts up to
+`MEMORY_SELECT_SEMANTIC_LIMIT`, which is deterministic and explainable, and the
+evaluation surfaced no contradiction failures. The concrete trigger for
+revisiting this is a user profile that regularly exceeds the render budget.
+
+**The constrained `save_memory` hook.** This is the only agentic memory action
+in the complete C′ definition. It stays deferred because the automatic path
+should demonstrate value first; omitting it is a documented departure from full
+C′ rather than a silent relabeling.
