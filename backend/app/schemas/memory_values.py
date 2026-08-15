@@ -16,7 +16,11 @@ from pydantic import (
     model_validator,
 )
 
-from app.schemas.episode_extraction import EpisodeClaim, EpisodeDraft
+from app.schemas.episode_extraction import (
+    EpisodeClaim,
+    EpisodeDraft,
+    contains_control_characters,
+)
 
 
 NonBlankString: TypeAlias = Annotated[
@@ -53,6 +57,15 @@ class SemanticMemoryValue(BaseModel):
     updated_at: NonBlankString | None = None
     version: int | None = Field(default=None, ge=1)
     data_epoch: int = Field(default=0, ge=0)
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_contain_controls(cls, value: str) -> str:
+        # Promotion no longer routes candidates through EpisodeClaim, so this
+        # is where a stored fact is kept free of control characters.
+        if contains_control_characters(value, allow_text_whitespace=True):
+            raise ValueError("semantic content contains control characters")
+        return value
 
 
 class EpisodeMemoryValue(BaseModel):

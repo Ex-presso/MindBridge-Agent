@@ -9,6 +9,7 @@ deterministic: a draft that trips a filter is dropped, never rewritten.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import re
 from typing import Literal
 import unicodedata
@@ -151,14 +152,13 @@ def _contains_persistent_instruction(value: str) -> bool:
     )
 
 
-def filter_draft(draft: EpisodeDraft) -> EpisodeFilterStatus | None:
-    """Return the filter verdict for a schema-valid draft, or None to accept."""
-    values = [
-        value
-        for claim in draft.claims
-        for value in (claim.claim, claim.evidence_quote)
-    ]
-    values.extend(draft.topics)
+def filter_values(values: Sequence[str]) -> EpisodeFilterStatus | None:
+    """Return the filter verdict for raw strings, or None to accept them.
+
+    Callers that hold a standalone statement rather than a draft use this
+    directly: routing a single string through ``EpisodeDraft`` would impose
+    that schema's unrelated claim-length limit on them.
+    """
     normalized = [_normalized_for_filter(value) for value in values]
     if any(
         _DIAGNOSTIC_TERM_PATTERN.search(value)
@@ -175,3 +175,14 @@ def filter_draft(draft: EpisodeDraft) -> EpisodeFilterStatus | None:
     if any(_contains_persistent_instruction(value) for value in normalized):
         return "filtered_instruction"
     return None
+
+
+def filter_draft(draft: EpisodeDraft) -> EpisodeFilterStatus | None:
+    """Return the filter verdict for a schema-valid draft, or None to accept."""
+    values = [
+        value
+        for claim in draft.claims
+        for value in (claim.claim, claim.evidence_quote)
+    ]
+    values.extend(draft.topics)
+    return filter_values(values)

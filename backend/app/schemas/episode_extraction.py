@@ -35,7 +35,7 @@ MessageContent = Annotated[
 ]
 
 
-def _contains_control_characters(
+def contains_control_characters(
     value: str,
     *,
     allow_text_whitespace: bool = False,
@@ -80,7 +80,7 @@ class EpisodeSourceMessage(BaseModel):
     @field_validator("content")
     @classmethod
     def content_must_not_contain_controls(cls, value: str) -> str:
-        if _contains_control_characters(value, allow_text_whitespace=True):
+        if contains_control_characters(value, allow_text_whitespace=True):
             raise ValueError("message content contains control characters")
         return value
 
@@ -102,7 +102,7 @@ class EpisodeClaim(BaseModel):
     @field_validator("claim", "evidence_quote")
     @classmethod
     def text_must_not_contain_controls(cls, value: str) -> str:
-        if _contains_control_characters(value, allow_text_whitespace=True):
+        if contains_control_characters(value, allow_text_whitespace=True):
             raise ValueError("episode claim contains control characters")
         return value
 
@@ -145,7 +145,7 @@ class EpisodeDraft(BaseModel):
     @field_validator("topics")
     @classmethod
     def topics_must_be_safe_and_unique(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        if any(_contains_control_characters(value) for value in values):
+        if any(contains_control_characters(value) for value in values):
             raise ValueError("topic contains control characters")
         normalized = [unicodedata.normalize("NFKC", value).casefold() for value in values]
         if len(set(normalized)) != len(normalized):

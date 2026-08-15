@@ -381,12 +381,26 @@ version. A deterministic key over normalized kind and content deduplicates
 equivalent facts, while a repeated statement moves attribution to the newest
 relational source.
 
-Semantic writes happen before the owning Episode write. If any Store operation
-fails, the outbox job retries; completed semantic keys are idempotent, so a
-partial external write converges without duplicate facts. Facts use
-`index=False` because Selection reads this small allow-listed profile exactly.
-Conflict resolution is intentionally not guessed from wording: superseding a
-different active fact remains the next Consolidation milestone.
+Semantic writes happen before the owning Episode write, but promotion is
+additive rather than load-bearing: a candidate that cannot be written is
+counted and logged, and the job proceeds to its Episode. One unusable or
+externally corrupted semantic value therefore cannot cost a user their
+episodic memory. Completed semantic keys are idempotent, so a partial external
+write converges without duplicate facts. At most 12 candidates are promoted per
+turn, matching the Episode claim cap, because each one costs two Store round
+trips inside the transaction that holds the User, Conversation, and job locks.
+
+A stored value whose `data_epoch` is older than the job's is treated as absent.
+Its content is legitimately re-derived from the current conversation, but the
+`confirmed`, `confidence`, `sensitivity`, and timestamp metadata of a record the
+user asked to erase is never inherited into the new epoch.
+
+Facts use `index=False` because Selection reads this small allow-listed profile
+exactly. Selection therefore enumerates the namespace and truncates at
+`MEMORY_SELECT_SEMANTIC_LIMIT`, without ordering: once a user holds more facts
+than that limit, which ones are rendered is unspecified. Conflict resolution is
+likewise not guessed from wording. Both are the concrete motivation for the
+Consolidation milestone rather than incidental gaps.
 
 Episodic memory uses a dedicated rolling conversation synopsis. It must not
 reuse the working-memory compaction summary: short conversations often never
@@ -442,7 +456,9 @@ fail-closed. They must be re-derived with grounded `claims` and a
 3. **Complete — minimal semantic layer:** fixed rules promote only explicit
    preferences, goals, helpful strategies, and important people from reloaded
    relational user text. Equivalent facts use deterministic keys; no diagnosis
-   is inferred and no second LLM call is introduced.
+   is inferred and no second LLM call is introduced. Candidates are capped per
+   turn, promotion failures are isolated from the Episode write, and pre-clear
+   metadata is never inherited across a data epoch.
 4. **Next — deterministic Consolidation:** trigger by an application threshold or
    cadence, not a model tool decision. Keep the scope limited to duplicates,
    contradictions, and stale active records exposed by the evaluation.
@@ -479,7 +495,7 @@ Verify assistant/revision/job transactionality, User → Conversation → Job lo
 order, lease-token ownership, exact-revision/data-epoch gates, infinite privacy
 deletion retries, relational evidence matching, and Store idempotency.
 
-The current automated evidence is `298 passed, 6 skipped` for the default
+The current automated evidence is `319 passed, 6 skipped` for the default
 backend suite with `ruff check backend` clean under the default rules; CI now
 gates the backend on that baseline. The six opt-in PostgreSQL integration tests
 also pass against a migrated throwaway database: they confirm `READ COMMITTED`

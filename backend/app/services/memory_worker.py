@@ -31,7 +31,6 @@ from app.services.episode_extraction import (
 )
 from app.services.memory_service import episode_namespace
 from app.services.semantic_memory import (
-    SemanticMemoryConflictError,
     derive_semantic_candidates,
     write_semantic_candidates,
 )
@@ -448,12 +447,15 @@ async def _process_locked_job(
     ):
         raise _BlockedJobError("output_evidence_invalid")
 
-    semantic_candidates = derive_semantic_candidates(
-        sources,
-        max_content_chars=settings.MEMORY_SEMANTIC_ITEM_MAX_CHARS,
-    )
+    # Semantic promotion is additive: the episode below is the job's actual
+    # deliverable, so a failure here is logged and skipped rather than costing
+    # the user their episodic memory. The gates above already ran.
     try:
-        await write_semantic_candidates(
+        semantic_candidates = derive_semantic_candidates(
+            sources,
+            max_content_chars=settings.MEMORY_SEMANTIC_ITEM_MAX_CHARS,
+        )
+        _, semantic_failures = await write_semantic_candidates(
             store,
             user_id=job.user_id,
             conversation_id=job.conversation_id,
@@ -461,10 +463,20 @@ async def _process_locked_job(
             data_epoch=job.data_epoch,
             timeout_seconds=_STORE_TIMEOUT_SECONDS,
         )
-    except SemanticMemoryConflictError as exc:
-        raise _BlockedJobError(str(exc)) from exc
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
-        raise _RetryableJobError("semantic_store_failed") from exc
+        semantic_failures = 1
+        logger.warning(
+            "Semantic promotion skipped; error_type=%s",
+            type(exc).__name__,
+        )
+    if semantic_failures:
+        logger.warning(
+            "Semantic promotion incomplete; job=%s failures=%s",
+            job.id,
+            semantic_failures,
+        )
 
     # Re-read the external value immediately before the idempotent write. Every
     # MindBridge writer holds the Conversation lock above, so revisions cannot
