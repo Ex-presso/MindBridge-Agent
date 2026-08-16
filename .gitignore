@@ -1,0 +1,72 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# MacOS
+.DS_Store
+Thumbs.db
+
+# Agent documentation
+AGENTS.md
+CLAUDE.md
+.claude/
+.agents/
+
+# Index for RAG
+backend/data/MentalChat16K_faiss_index/
+*.index
+
+# Log file
+*.log
+
+# old file
+*_bak.py
+
+# documents
+product_plan.md
+docs/develop.md
+docs/system_arch.md
+docs/memory_design.md
+docs/concurrency_notes.md
+docs/concurrency_notes.en.md

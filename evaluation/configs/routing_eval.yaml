@@ -1,0 +1,26 @@
+# Agent routing benchmark configuration.
+#
+# Measures whether the LangGraph agent invokes the
+# fetch_mental_health_examples tool when it should (and abstains when it
+# shouldn't), against a hand-labeled benchmark of 50 queries.
+
+benchmark_path: "datasets/routing_benchmark.json"
+
+# LLM used to drive the agent's tool-calling decision.
+# The release candidate uses DeepSeek through the generic OpenAI-compatible path.
+llm_provider: "openai_compatible"
+llm_model: "deepseek-v4-flash"
+llm_base_url: "https://api.deepseek.com"
+llm_api_key_env: "DEEPSEEK_API_KEY"
+temperature: 0.0            # deterministic routing
+
+# Skip ambiguous-labeled queries when computing precision/recall/F1
+# (they are still recorded so reviewers can inspect the model's choice).
+score_ambiguous: false
+
+# Use an existing pgvector collection so we don't need to build a new index.
+# Any populated collection works — retrieval quality doesn't affect the
+# routing decision we measure here, only whether the tool was invoked.
+pgvector_collection: "ir_eval_cs1000_co100"
+embedding_provider: "sentence_transformers"
+embedding_model: "Qwen/Qwen3-Embedding-0.6B"

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          version: "0.11.28"
+
+      # Pin both the Ruff release and the intended rule set. An unpinned
+      # `uvx ruff` otherwise lets a published commit change behavior when a
+      # new Ruff release reaches PyPI.
+      - name: Lint
+        run: |
+          uvx --from ruff==0.16.0 ruff check --select E4,E7,E9,F backend
+          uvx --from ruff==0.16.0 ruff check --select E9,F63,F7,F82 evaluation
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          uv sync --locked
+          uv run pytest -q
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend-next/package-lock.json
+
+      - name: Frontend build
+        working-directory: frontend-next
+        run: |
+          npm ci
+          npm run lint
+          npm run build

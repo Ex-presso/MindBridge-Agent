@@ -1,0 +1,14 @@
+# Live API-level evaluation for cross-conversation episodic memory.
+backend_url: "http://localhost:8080/api/v1"
+provider: "openai_compatible"
+model: "deepseek-v4-flash"
+provider_base_url: "https://api.deepseek.com"
+provider_api_key_env: "DEEPSEEK_API_KEY"
+embedding_model: "text-embedding-nomic-embed-text-v1.5"
+embedding_dims: 768
+memory_wait_timeout_s: 90
+poll_interval_s: 1
+# Production auth defaults to 5 registrations/minute. The live benchmark uses
+# disposable users, so pace account creation instead of weakening the limit.
+registration_interval_s: 12.5
+account_deletion_interval_s: 12.5

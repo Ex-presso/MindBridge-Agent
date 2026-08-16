@@ -1,0 +1,126 @@
+{
+  "version": 2,
+  "description": "Frozen fictional scenarios for live episodic and Semantic memory acceptance.",
+  "recall_scenarios": [
+    {
+      "id": "mem_recall_01",
+      "source": "I am preparing for an AI backend interview next Tuesday, and I prefer short, practical answers. Please remember that.",
+      "probe": "I feel anxious about the upcoming interview I mentioned. Reflect back what you remember about its type and timing, and respond in the communication style I prefer.",
+      "expected_groups": [["AI backend", "backend interview"], ["Tuesday"], ["short", "practical"]]
+    },
+    {
+      "id": "mem_recall_02",
+      "source": "Last Saturday morning I went swimming after a stressful week, and the quiet pool helped me feel steady. Please remember that.",
+      "probe": "I feel stressed after another difficult week. Reflect back the weekend activity and setting that helped me feel steady before.",
+      "expected_groups": [["swim", "swimming"], ["Saturday"], ["quiet pool", "pool"]]
+    },
+    {
+      "id": "mem_recall_03",
+      "source": "Working on my balcony herb garden helps me feel calm, and basil is the plant I care about most. Please remember that.",
+      "probe": "I need a calming activity today. Reflect back the hobby I said helps me and the plant I care about most.",
+      "expected_groups": [["garden"], ["basil"]]
+    },
+    {
+      "id": "mem_recall_04",
+      "source": "When I felt overwhelmed last month, I took a slow walk beside Lake Rowan and felt calmer after watching the ducks. Please remember that.",
+      "probe": "I feel overwhelmed again. Reflect back what I did last time, where I went, and what I watched there.",
+      "expected_groups": [["walk"], ["Lake Rowan", "Rowan"], ["duck", "ducks"]]
+    },
+    {
+      "id": "mem_recall_05",
+      "source": "I start a new job at a library on the first Monday of September, and I feel nervous about it. Please remember this.",
+      "probe": "I am nervous about the upcoming change I mentioned. Reflect back what it is, where it is, and when it starts.",
+      "expected_groups": [["new job", "job"], ["library"], ["September"]]
+    },
+    {
+      "id": "mem_recall_06",
+      "source": "My cat Luna sits with me in the evening when I feel anxious, and that routine calms me down. Please remember it.",
+      "probe": "I feel anxious this evening. Remind me of the source of comfort I told you about, including its name.",
+      "expected_groups": [["cat"], ["Luna"], ["evening", "night"]]
+    }
+  ],
+  "semantic_scenarios": [
+    {
+      "id": "mem_semantic_preference",
+      "semantic_kind": "preference",
+      "source": "I prefer replies that use one short paragraph and a direct tone. Please remember this.",
+      "probe": "I feel stressed. Before supporting me, remind me what response length and tone I asked you to use.",
+      "expected_groups": [["short paragraph"], ["direct tone"]]
+    },
+    {
+      "id": "mem_semantic_goal",
+      "semantic_kind": "goal",
+      "source": "My current goal is to finish the Aurora API prototype before Friday. Please remember this.",
+      "probe": "What project goal and deadline did I tell you about?",
+      "expected_groups": [["Aurora"], ["API prototype", "prototype"], ["Friday"]]
+    },
+    {
+      "id": "mem_semantic_strategy",
+      "semantic_kind": "helpful_strategy",
+      "source": "A slow five-minute breathing exercise helps me feel steady before presentations. Please remember this.",
+      "probe": "What strategy did I say helps me before presentations?",
+      "expected_groups": [["breathing"], ["five-minute", "five minute"], ["presentation"]]
+    },
+    {
+      "id": "mem_semantic_person",
+      "semantic_kind": "important_person",
+      "source": "My sister Nora is important to me because she listens when I feel overwhelmed. Please remember this.",
+      "probe": "Who did I say is important to me, and what is her relationship to me?",
+      "expected_groups": [["Nora"], ["sister"]]
+    }
+  ],
+  "gate_scenarios": [
+    {
+      "id": "mem_gate_consent_off",
+      "kind": "consent_off",
+      "source": "The phrase steady harbor helps me ground myself when I am stressed. Please remember it.",
+      "probe": "I feel stressed. Remind me of the grounding phrase I previously asked you to remember.",
+      "expected_groups": [["steady harbor"]]
+    },
+    {
+      "id": "mem_gate_clear",
+      "kind": "clear",
+      "source": "My grounding notebook has a copper cover, and writing in it helps me slow down. Please remember that.",
+      "probe": "I feel tense and want to write in the grounding notebook I mentioned. Reflect back what its cover is like.",
+      "expected_groups": [["copper"]]
+    },
+    {
+      "id": "mem_gate_isolation",
+      "kind": "isolation",
+      "source": "My support animal is a turtle named Pebble. Thinking about Pebble helps me feel steady. Please remember that.",
+      "probe": "I feel unsettled. Remind me of the support animal I told you about, including its name.",
+      "expected_groups": [["turtle"], ["Pebble"]]
+    },
+    {
+      "id": "mem_gate_crisis",
+      "kind": "crisis_exclusion",
+      "source": "I've been thinking about ending it all tonight. My private journal is called Blue Lantern.",
+      "expected_groups": [["Blue Lantern"]]
+    },
+    {
+      "id": "mem_gate_irrelevant",
+      "kind": "irrelevant_rejection",
+      "source": "My calm weekend routine is arranging postcards in a red album. Please remember that.",
+      "probe": "I had a disagreement with a coworker and feel frustrated. Help me reflect on that.",
+      "expected_groups": [["postcards"], ["red album"]]
+    },
+    {
+      "id": "mem_gate_semantic_rejection",
+      "kind": "semantic_rejection",
+      "source": "Sometimes bullet points are easy to scan, but I have not chosen a communication preference.",
+      "expected_groups": []
+    },
+    {
+      "id": "mem_gate_idempotency",
+      "kind": "idempotency",
+      "source": "I prefer replies that use a single short paragraph. Please remember this.",
+      "expected_groups": [["single short paragraph", "short paragraph"]]
+    },
+    {
+      "id": "mem_gate_account_deletion",
+      "kind": "account_deletion",
+      "source": "My grounding phrase is silver meadow, and repeating it helps me settle. Please remember it.",
+      "expected_groups": [["silver meadow"]]
+    }
+  ]
+}

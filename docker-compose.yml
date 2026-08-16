@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mindbridge-postgres
+    environment:
+      POSTGRES_USER: mindbridge
+      POSTGRES_PASSWORD: mindbridge_dev
+      POSTGRES_DB: mindbridge
+    ports:
+      - "5432:5432"
+    volumes:
+      - mindbridge_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mindbridge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mindbridge-backend
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://mindbridge:mindbridge_dev@postgres:5432/mindbridge
+      HOST: 0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend-next
+      dockerfile: Dockerfile
+    container_name: mindbridge-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  mindbridge_pgdata:
