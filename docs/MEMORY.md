@@ -4,8 +4,8 @@ MindBridge separates conversation continuity from durable user memory.
 Conversation state is a LangGraph checkpoint per thread; durable memory is a
 user-scoped store that survives across conversations and is opt-in.
 
-This document covers the design, the invariants it holds, how it was verified,
-and what is deliberately out of scope.
+This document describes the design, its invariants, verification, and known
+limits.
 
 ## Design
 
@@ -208,8 +208,6 @@ records and 12,000 characters, and the current turn is always included.
 
 ## Verification
 
-Claims here are limited to what was actually observed.
-
 **Automated.** The backend suite and lint run in CI on every push.
 
 **Concurrency, against real PostgreSQL.** Six opt-in integration tests confirm
@@ -219,17 +217,9 @@ composite ownership foreign keys reject cross-user jobs and cascade correctly;
 and that concurrent workers lease disjoint jobs while a stale lease token cannot
 complete a re-leased job.
 
-The two leasing invariants were falsified before being trusted: removing
-`skip_locked` makes the second worker block until the test times out, and
-removing the `lease_until` equality check lets a superseded worker mark the job
-succeeded. Both tests fail when the guarantee is removed, which is why they are
-evidence rather than decoration.
-
-**End to end, through the product UI.** Browser acceptance on 2026-08-16 used a
-disposable account to complete registration → encrypted DeepSeek BYOK → consent
-→ chat → outbox → leased worker → Store → new conversation → exact recall.
-Permanent deletion returned to login, rejected the deleted credentials, and
-left no matching user, Store value, or message rows.
+Mutation checks cover the two leasing invariants: removing `skip_locked` makes
+the second worker time out, while removing the `lease_until` equality check lets
+a stale worker complete a re-leased job.
 
 **Release evaluation.** The current public-API suite passed 24/24 cases with
 DeepSeek V4 Flash and a 768-dimensional Nomic embedding served by LM Studio:
@@ -255,10 +245,8 @@ uv run alembic upgrade head
 RUN_LOCAL_INTEGRATION=1 uv run pytest tests/test_memory_postgres_integration.py
 ```
 
-Point it at a disposable database rather than a development one. The suite
-creates and deletes its own `@example.com` accounts, and an autouse fixture
-removes accounts a failed run left behind so a re-run cannot lease an orphaned
-job and report a misleading result.
+Use a disposable database. The suite creates and deletes `@example.com`
+accounts, and its fixture removes records left by interrupted runs.
 
 ## Operations
 

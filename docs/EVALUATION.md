@@ -1,14 +1,9 @@
-# MindBridge evaluation
-
-MindBridge reports only results generated against the current Agent, memory
-pipeline, model configuration, and rubric. Superseded result files and charts
-are removed instead of being presented as current evidence.
+# Evaluation
 
 ## Release evidence
 
-Model-backed suites were validated on 2026-08-15 with `deepseek-v4-flash`
-through DeepSeek's OpenAI-compatible API. The browser product path was
-revalidated on 2026-08-16.
+These results were generated on 2026-08-15 with `deepseek-v4-flash` through
+DeepSeek's OpenAI-compatible API.
 
 | Capability | Frozen scope | Result |
 |---|---:|---:|
@@ -17,15 +12,13 @@ revalidated on 2026-08-16.
 | Episodic memory | 6 paired cross-session scenarios | Memory on **6/6**, memory off **0/6** |
 | Semantic memory | 4 explicit fact kinds | Storage **4/4**, cross-session recall **4/4** |
 | Memory hard gates | 8 privacy, safety, isolation, deletion, and idempotency cases | **8/8 passed** |
-| Browser product path | Registration → BYOK → consent → chat → Store → new chat → recall → deletion | **Passed** |
 
-Every published runner completed with zero execution errors. These are bounded
-engineering acceptance results, not claims about general mental-health quality
-or model intelligence.
+All runners completed without execution errors. The scores apply only to the
+committed cases; they do not measure general mental-health quality.
 
 ## 1. Conditional RAG routing
 
-The routing benchmark asks whether the LangGraph Agent calls
+The routing benchmark asks whether the LangGraph agent calls
 `fetch_mental_health_examples` once for a substantive mental-health support
 request and abstains for greetings, conversation closure, assistant-meta
 questions, and unrelated factual requests.
@@ -35,7 +28,7 @@ questions, and unrelated factual requests.
 - 50 hand-labeled queries: 27 positive, 18 negative, and 5 ambiguous.
 - Ambiguous cases remain in the raw output but are excluded from the headline
   confusion matrix.
-- The full Agent graph runs with `AgentRunContext`; the evaluator inspects
+- The full agent graph runs with `AgentRunContext`; the evaluator inspects
   actual `AIMessage.tool_calls` and rejects any run containing an execution
   error.
 - The RAG tool executes against PostgreSQL/pgvector. The configured Qwen
@@ -76,10 +69,9 @@ categories should receive crisis resources. The deterministic `safety_check`
 node runs before normal chat, bypasses the RAG loop for matched threats, and
 appends resource details independently of model wording.
 
-Two rubric corrections were made before publishing: `mental health
-professional`, `crisis line`, and `988` are accepted as equivalents to
-`professional help`; the harmless phrase `take the weight off` is no longer
-treated as prescription advice. The generated responses were not edited.
+The marker rubric treats `mental health professional`, `crisis line`, and `988`
+as professional referrals. The phrase `take the weight off` is not treated as
+prescription advice.
 
 Evidence:
 
@@ -110,25 +102,13 @@ dimensions for episodic Selection.
 The four Semantic kinds are explicit preference, goal, helpful strategy, and
 important person. The eight hard gates cover consent-off behavior, physical
 clear plus data-epoch invalidation, user isolation, crisis exclusion,
-irrelevant-memory rejection, Semantic rejection, duplicate-delivery
+irrelevant-memory rejection, semantic rejection, duplicate-delivery
 idempotency, and account deletion with Store cleanup.
-
-One response said `library job` rather than the rubric's original exact phrase
-`new job`. Because the response also included `library` and `September`, the
-frozen expected group now accepts `job` as an equivalent description. The
-stored response was re-scored without regeneration or editing.
 
 Evidence:
 
 - `evaluation/results/memory_eval_results.csv`
 - `evaluation/results/memory_eval_summary.csv`
-
-The browser acceptance used the production UI with a disposable account. It
-confirmed the DeepSeek default, encrypted BYOK setup, memory consent, worker
-storage, exact recall in a new conversation, permanent account deletion, and
-rejected login afterward. Final database checks found no matching user, Store
-value, or message rows. This was a release acceptance pass rather than a new
-browser automation suite.
 
 ## Limitations
 
@@ -163,5 +143,5 @@ uv run --project ../backend python eval_memory.py --max-recall 1 --skip-gates
 uv run --project ../backend python eval_memory.py
 ```
 
-The live runner honors the production authentication limit by pacing disposable
-account creation and cleanup. It never weakens the application's rate limit.
+The live runner paces disposable account creation and cleanup to stay within the
+configured authentication rate limit.

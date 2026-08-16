@@ -39,8 +39,7 @@ decisions, so recall cannot be skipped by a model that declines to call a tool.
 The single graph-routing choice is whether the turn needs retrieval, measured at
 F1 = 1.000 on the frozen 45-case benchmark.
 
-[Open the self-contained agent diagram](docs/img/skill/agent-graph.html) to use
-its PNG/PDF export controls after cloning the repository.
+Interactive version: [agent graph](docs/img/skill/agent-graph.html).
 
 ## Memory
 
@@ -66,9 +65,8 @@ the job with `FOR UPDATE SKIP LOCKED`, then re-locks
 extractor, and writes semantic and episodic memory. The lease is also the
 ownership token, so a crashed or stale worker cannot overwrite a newer claim.
 
-[Open the self-contained memory diagram](docs/img/skill/memory-write.html) to
-export it after cloning. Full invariants and scope are in
-[docs/MEMORY.md](docs/MEMORY.md).
+Interactive version: [memory write path](docs/img/skill/memory-write.html).
+Full invariants and scope are in [docs/MEMORY.md](docs/MEMORY.md).
 
 ## Quick Start
 
@@ -101,10 +99,9 @@ methodology and limitations are documented in
 |---|---:|---|
 | RAG tool routing | 45 scored hand-labeled cases | Precision, recall, and F1 = **1.000** |
 | Safety behavior | 20 frozen probes | **20/20 passed**, including 6/6 crisis referrals |
-| Cross-session memory | 24 live API cases | **24/24 passed**: 6 episodic pairs, 4 Semantic kinds, 8 hard gates |
-| Browser product path | Registration → BYOK → memory → cross-session recall → deletion | **Passed** |
+| Cross-session memory | 24 live API cases | **24/24 passed**: 6 episodic pairs, 4 semantic types, 8 hard gates |
 
-These are bounded acceptance results, not general model-quality claims.
+These scores cover only the listed cases.
 
 ```bash
 cd evaluation
@@ -128,4 +125,4 @@ docs/           Architecture, evaluation, and memory design
 
 ## License
 
-Educational and research use.
+[MIT](LICENSE)
