@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
 import { readSSEStream } from "@/lib/stream";
 import type { Message, OptimisticMessage } from "@/types";
@@ -25,12 +26,12 @@ export function useChat({
   const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
   const sendMessage = useCallback(
-    async (
-      text: string,
-      model = "deepseek-v4-flash",
-      provider = "openai_compatible",
-    ) => {
+    async (text: string, model: string, provider: string) => {
       if (!text.trim() || isLoading) return;
+      if (!model || !provider) {
+        toast.error("Add an API key in Settings to start chatting.");
+        return;
+      }
       setError(null);
       setIsLoading(true);
 
@@ -40,7 +41,13 @@ export function useChat({
       setMessages((prev) => [
         ...prev,
         { id: userMsgId, role: "user", content: text },
-        { id: assistantMsgId, role: "assistant", content: "", isStreaming: true },
+        {
+          id: assistantMsgId,
+          role: "assistant",
+          content: "",
+          isStreaming: true,
+          startedAt: Date.now(),
+        },
       ]);
 
       try {
@@ -83,12 +90,16 @@ export function useChat({
 
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
+            m.id === assistantMsgId
+              ? { ...m, isStreaming: false, completedAt: Date.now() }
+              : m,
           ),
         );
         if (newConvId) onNewConversation?.(newConvId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Something went wrong.");
+        const message = err instanceof Error ? err.message : "Something went wrong.";
+        setError(message);
+        toast.error(message, { id: "chat-stream-error" });
         setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
       } finally {
         setIsLoading(false);

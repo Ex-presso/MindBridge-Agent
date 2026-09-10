@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect } from "react";
+import { use, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { ChatWindow } from "@/components/chat/ChatWindow";
@@ -39,8 +39,15 @@ export default function ConversationPage({ params }: Props) {
     },
   });
 
+  const isLoadingRef = useRef(isLoading);
   useEffect(() => {
-    if (data?.messages) {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  useEffect(() => {
+    // Never replace optimistic state mid-stream: an SWR revalidation here
+    // returns history without the reply currently streaming and would wipe it.
+    if (data?.messages && !isLoadingRef.current) {
       resetMessages(data.messages);
     }
   }, [data?.id, data?.messages, resetMessages]);
@@ -61,7 +68,7 @@ export default function ConversationPage({ params }: Props) {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <ChatWindow messages={messages} isLoading={isLoading} />
+      <ChatWindow messages={messages} />
       <ChatInput onSend={sendMessage} isLoading={isLoading} models={availableModels} />
     </div>
   );
