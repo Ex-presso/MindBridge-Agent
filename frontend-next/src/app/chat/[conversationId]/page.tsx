@@ -54,7 +54,7 @@ export default function ConversationPage({ params }: Props) {
   if (historyLoading) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <div className="h-6 w-6 rounded-full border-2 border-[--primary] border-t-transparent animate-spin" />
+        <div className="h-6 w-6 rounded-full border-2 border-(--primary) border-t-transparent animate-spin" />
       </div>
     );
   }

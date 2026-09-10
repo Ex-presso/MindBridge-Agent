@@ -5,12 +5,12 @@ export function TypingIndicator() {
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="inline-block h-2 w-2 rounded-full bg-[--muted-foreground] animate-bounce"
+            className="inline-block h-2 w-2 rounded-full bg-(--muted-foreground) animate-bounce"
             style={{ animationDelay: `${i * 0.15}s` }}
           />
         ))}
       </div>
-      <span className="text-xs text-[--muted-foreground] ml-1">MindBridge is thinking…</span>
+      <span className="text-xs text-(--muted-foreground) ml-1">MindBridge is thinking…</span>
     </div>
   );
 }

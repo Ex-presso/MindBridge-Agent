@@ -18,7 +18,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   if (!initialized) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="h-6 w-6 rounded-full border-2 border-[--primary] border-t-transparent animate-spin" />
+        <div className="h-6 w-6 rounded-full border-2 border-(--primary) border-t-transparent animate-spin" />
       </div>
     );
   }
@@ -26,8 +26,8 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   if (!accessToken) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[--background]">
-      <div className="hidden md:flex flex-col border-r border-[--border] bg-[--sidebar-bg]">
+    <div className="flex h-screen overflow-hidden bg-(--background)">
+      <div className="hidden md:flex flex-col border-r border-(--border) bg-(--sidebar-bg)">
         <Sidebar />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">

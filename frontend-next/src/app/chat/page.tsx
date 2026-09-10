@@ -37,11 +37,11 @@ export default function NewChatPage() {
     <div className="flex flex-1 flex-col">
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-8">
         <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[--primary]/10">
-            <Brain className="h-7 w-7 text-[--primary]" />
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-(--primary)/10">
+            <Brain className="h-7 w-7 text-(--primary)" />
           </div>
           <h1 className="text-2xl font-semibold">How are you feeling today?</h1>
-          <p className="text-sm text-[--muted-foreground] max-w-sm">
+          <p className="text-sm text-(--muted-foreground) max-w-sm">
             I&apos;m here to listen and support you. Share what&apos;s on your mind.
           </p>
         </div>
@@ -51,10 +51,10 @@ export default function NewChatPage() {
             <button
               key={text}
               onClick={() => sendMessage(text)}
-              className="flex items-center gap-3 rounded-xl border border-[--border] bg-[--background] px-4 py-3 text-left text-sm hover:bg-[--muted] transition-colors"
+              className="flex items-center gap-3 rounded-xl border border-(--border) bg-(--background) px-4 py-3 text-left text-sm hover:bg-(--muted) transition-colors"
             >
-              <Icon className="h-4 w-4 shrink-0 text-[--primary]" />
-              <span className="text-[--foreground]">{text}</span>
+              <Icon className="h-4 w-4 shrink-0 text-(--primary)" />
+              <span className="text-(--foreground)">{text}</span>
             </button>
           ))}
         </div>

@@ -55,12 +55,12 @@ export function ConversationItem({ conversation, isActive, onDelete, onRename }:
     <>
       <div
         className={cn(
-          "group flex items-center gap-2 rounded-lg px-2 py-2 text-sm cursor-pointer transition-colors hover:bg-[--border]",
-          isActive && "bg-[--border] font-medium",
+          "group flex items-center gap-2 rounded-lg px-2 py-2 text-sm cursor-pointer transition-colors hover:bg-(--border)",
+          isActive && "bg-(--border) font-medium",
         )}
         onClick={() => router.push(`/chat/${conversation.id}`)}
       >
-        <span className="flex-1 truncate text-[--foreground]">{conversation.title}</span>
+        <span className="flex-1 truncate text-(--foreground)">{conversation.title}</span>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -79,7 +79,7 @@ export function ConversationItem({ conversation, isActive, onDelete, onRename }:
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="text-[--destructive] focus:text-[--destructive]"
+              className="text-(--destructive) focus:text-(--destructive)"
               onClick={(e) => { e.stopPropagation(); handleDelete(); }}
             >
               <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete

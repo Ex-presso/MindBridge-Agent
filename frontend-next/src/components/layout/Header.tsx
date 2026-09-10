@@ -15,9 +15,9 @@ export function Header() {
     : user?.email.slice(0, 2).toUpperCase() ?? "MB";
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-[--border] px-4">
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-(--border) px-4">
       <div className="flex items-center gap-2">
-        <Brain className="h-5 w-5 text-[--primary]" />
+        <Brain className="h-5 w-5 text-(--primary)" />
         <span className="font-semibold text-sm tracking-tight">MindBridge</span>
       </div>
 
@@ -30,9 +30,9 @@ export function Header() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <div className="px-2 py-1.5 text-xs text-[--muted-foreground] truncate">{user?.email}</div>
+          <div className="px-2 py-1.5 text-xs text-(--muted-foreground) truncate">{user?.email}</div>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={logout} className="text-[--destructive] focus:text-[--destructive]">
+          <DropdownMenuItem onClick={logout} className="text-(--destructive) focus:text-(--destructive)">
             <LogOut className="mr-2 h-3.5 w-3.5" /> Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>

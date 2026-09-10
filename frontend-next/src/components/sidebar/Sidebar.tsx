@@ -47,7 +47,7 @@ export function Sidebar() {
 
       <ScrollArea className="flex-1 px-2 py-2">
         {conversations.length === 0 && (
-          <div className="flex flex-col items-center gap-2 py-8 text-center text-xs text-[--muted-foreground]">
+          <div className="flex flex-col items-center gap-2 py-8 text-center text-xs text-(--muted-foreground)">
             <MessageSquare className="h-8 w-8 opacity-30" />
             <p>No conversations yet</p>
           </div>
@@ -55,7 +55,7 @@ export function Sidebar() {
 
         {DATE_ORDER.filter((label) => groups[label]?.length).map((label) => (
           <div key={label} className="mb-3">
-            <p className="px-2 py-1 text-xs font-medium text-[--muted-foreground]">{label}</p>
+            <p className="px-2 py-1 text-xs font-medium text-(--muted-foreground)">{label}</p>
             {groups[label].map((conv) => (
               <ConversationItem
                 key={conv.id}
@@ -73,7 +73,7 @@ export function Sidebar() {
       <div className="p-3">
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2 text-sm text-[--muted-foreground]"
+          className="w-full justify-start gap-2 text-sm text-(--muted-foreground)"
           onClick={() => router.push("/chat/settings")}
         >
           <Settings className="h-4 w-4" />

@@ -82,23 +82,23 @@ function ProviderCard({
   };
 
   return (
-    <div className="rounded-xl border border-[--border] bg-[--background] p-5">
+    <div className="rounded-xl border border-(--border) bg-(--background) p-5">
       <div className="flex items-center justify-between mb-3">
         <div>
           <h3 className="font-medium text-sm">{info.label}</h3>
-          <p className="text-xs text-[--muted-foreground]">{info.description}</p>
+          <p className="text-xs text-(--muted-foreground)">{info.description}</p>
         </div>
         {existingKey ? (
           <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full">
             <Check className="h-3 w-3" /> Configured
           </span>
         ) : (
-          <span className="text-xs text-[--muted-foreground] bg-[--muted] px-2 py-0.5 rounded-full">Not configured</span>
+          <span className="text-xs text-(--muted-foreground) bg-(--muted) px-2 py-0.5 rounded-full">Not configured</span>
         )}
       </div>
 
       {existingKey && (
-        <p className="text-xs text-[--muted-foreground] mb-3 font-mono">{existingKey.api_key_masked}</p>
+        <p className="text-xs text-(--muted-foreground) mb-3 font-mono">{existingKey.api_key_masked}</p>
       )}
 
       <div className="flex flex-col gap-3">
@@ -115,7 +115,7 @@ function ProviderCard({
             <button
               type="button"
               onClick={() => setShowKey(!showKey)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[--muted-foreground] hover:text-[--foreground]"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-(--muted-foreground) hover:text-(--foreground)"
             >
               {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             </button>
@@ -164,7 +164,7 @@ function ProviderCard({
             {saving ? "Saving..." : existingKey ? "Update Key" : "Save Key"}
           </Button>
           {existingKey && (
-            <Button size="sm" variant="outline" onClick={handleDelete} className="text-[--destructive]">
+            <Button size="sm" variant="outline" onClick={handleDelete} className="text-(--destructive)">
               <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
             </Button>
           )}
@@ -276,13 +276,13 @@ export default function SettingsPage() {
           </Button>
           <div>
             <h1 className="text-lg font-semibold">API Keys</h1>
-            <p className="text-xs text-[--muted-foreground]">Configure your LLM provider keys. Keys are encrypted and stored securely.</p>
+            <p className="text-xs text-(--muted-foreground)">Configure your LLM provider keys. Keys are encrypted and stored securely.</p>
           </div>
         </div>
 
         {keysLoading ? (
           <div className="flex justify-center py-12">
-            <div className="h-6 w-6 rounded-full border-2 border-[--primary] border-t-transparent animate-spin" />
+            <div className="h-6 w-6 rounded-full border-2 border-(--primary) border-t-transparent animate-spin" />
           </div>
         ) : (
           <div className="flex flex-col gap-4">
@@ -299,7 +299,7 @@ export default function SettingsPage() {
         )}
 
         <Separator className="my-6" />
-        <p className="text-xs text-[--muted-foreground] text-center">
+        <p className="text-xs text-(--muted-foreground) text-center">
           Your keys are encrypted at rest and never shared. They are used only to make LLM API calls on your behalf.
         </p>
 
@@ -307,37 +307,37 @@ export default function SettingsPage() {
 
         <section aria-labelledby="memory-settings-title">
           <div className="mb-4 flex items-start gap-3">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[--muted] text-[--muted-foreground]">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--muted) text-(--muted-foreground)">
               <Brain className="h-4 w-4" aria-hidden="true" />
             </div>
             <div>
               <h2 id="memory-settings-title" className="text-base font-semibold">Memory</h2>
-              <p className="text-xs leading-5 text-[--muted-foreground]">
+              <p className="text-xs leading-5 text-(--muted-foreground)">
                 Control whether MindBridge can retain useful context between conversations.
               </p>
             </div>
           </div>
 
-          <div className="rounded-xl border border-[--border] bg-[--background] p-5" aria-busy={memoryLoading || memoryBusy !== null}>
+          <div className="rounded-xl border border-(--border) bg-(--background) p-5" aria-busy={memoryLoading || memoryBusy !== null}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-medium">Long-term memory</p>
                   {memoryLoading ? (
-                    <span className="text-xs text-[--muted-foreground]">Loading…</span>
+                    <span className="text-xs text-(--muted-foreground)">Loading…</span>
                   ) : memoryUnknown ? (
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">Unable to load</span>
                   ) : !systemEnabled ? (
-                    <span className="rounded-full bg-[--muted] px-2 py-0.5 text-xs text-[--muted-foreground]">Unavailable</span>
+                    <span className="rounded-full bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">Unavailable</span>
                   ) : memoryEnabled ? (
                     <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/20 dark:text-green-400">
                       <Check className="h-3 w-3" aria-hidden="true" /> Enabled
                     </span>
                   ) : (
-                    <span className="rounded-full bg-[--muted] px-2 py-0.5 text-xs text-[--muted-foreground]">Disabled</span>
+                    <span className="rounded-full bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">Disabled</span>
                   )}
                 </div>
-                <p className="mt-1 max-w-lg text-xs leading-5 text-[--muted-foreground]">
+                <p className="mt-1 max-w-lg text-xs leading-5 text-(--muted-foreground)">
                   {memoryUnknown
                     ? "We could not verify your current memory status or stored item count. You can still turn memory off or clear it below."
                     : systemEnabled
@@ -352,11 +352,11 @@ export default function SettingsPage() {
                 <p className="text-lg font-semibold tabular-nums" aria-label={`${storedMemoryCount} stored memories`}>
                   {storedMemoryCount}
                 </p>
-                <p className="text-xs text-[--muted-foreground]">stored memories</p>
+                <p className="text-xs text-(--muted-foreground)">stored memories</p>
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[--border] pt-4">
+            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-(--border) pt-4">
               <Button
                 size="sm"
                 variant={memoryEnabled ? "outline" : "default"}
@@ -377,7 +377,7 @@ export default function SettingsPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="text-[--destructive]"
+                    className="text-(--destructive)"
                     disabled={memoryLoading || memoryBusy !== null}
                   >
                     <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -387,7 +387,7 @@ export default function SettingsPage() {
                 <DialogContent aria-describedby="clear-memory-description">
                   <DialogHeader>
                     <DialogTitle>Clear all stored memory?</DialogTitle>
-                    <p id="clear-memory-description" className="text-sm leading-6 text-[--muted-foreground]">
+                    <p id="clear-memory-description" className="text-sm leading-6 text-(--muted-foreground)">
                       This permanently deletes the context MindBridge has saved about you and turns memory off. This action cannot be undone.
                     </p>
                   </DialogHeader>
@@ -417,17 +417,17 @@ export default function SettingsPage() {
 
         <section aria-labelledby="account-settings-title">
           <div className="mb-4">
-            <h2 id="account-settings-title" className="text-base font-semibold text-[--destructive]">Danger zone</h2>
-            <p className="mt-1 text-xs leading-5 text-[--muted-foreground]">
+            <h2 id="account-settings-title" className="text-base font-semibold text-(--destructive)">Danger zone</h2>
+            <p className="mt-1 text-xs leading-5 text-(--muted-foreground)">
               Permanently remove your conversations, checkpoints, API keys, and all stored memory.
             </p>
           </div>
 
-          <div className="rounded-xl border border-[--destructive]/40 bg-[--background] p-5">
+          <div className="rounded-xl border border-(--destructive)/40 bg-(--background) p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm font-medium">Delete account</p>
-                <p className="mt-1 text-xs leading-5 text-[--muted-foreground]">
+                <p className="mt-1 text-xs leading-5 text-(--muted-foreground)">
                   This action cannot be undone. External memory and conversation checkpoints are cleared before your account row is removed.
                 </p>
               </div>
@@ -445,7 +445,7 @@ export default function SettingsPage() {
                 <DialogContent aria-describedby="delete-account-description">
                   <DialogHeader>
                     <DialogTitle>Delete your account permanently?</DialogTitle>
-                    <p id="delete-account-description" className="text-sm leading-6 text-[--muted-foreground]">
+                    <p id="delete-account-description" className="text-sm leading-6 text-(--muted-foreground)">
                       Enter your password to confirm. If external cleanup is temporarily unavailable, your account stays disabled and the deletion can be retried.
                     </p>
                   </DialogHeader>
