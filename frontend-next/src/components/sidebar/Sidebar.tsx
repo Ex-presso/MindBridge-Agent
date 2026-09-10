@@ -1,7 +1,8 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { Plus, MessageSquare, Settings } from "lucide-react";
+import { Plus, MessageSquare, Settings, Brain } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -70,14 +71,28 @@ export function Sidebar() {
       </ScrollArea>
 
       <Separator />
-      <div className="p-3">
+      <div className="flex flex-col gap-0.5 p-3">
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2 text-sm text-(--muted-foreground)"
+          className={cn(
+            "w-full justify-start gap-2 text-sm text-(--muted-foreground)",
+            pathname === "/chat/memory" && "bg-(--muted) text-(--foreground)",
+          )}
+          onClick={() => router.push("/chat/memory")}
+        >
+          <Brain className="h-4 w-4" />
+          Memory
+        </Button>
+        <Button
+          variant="ghost"
+          className={cn(
+            "w-full justify-start gap-2 text-sm text-(--muted-foreground)",
+            pathname === "/chat/settings" && "bg-(--muted) text-(--foreground)",
+          )}
           onClick={() => router.push("/chat/settings")}
         >
           <Settings className="h-4 w-4" />
-          API Keys
+          Settings
         </Button>
       </div>
     </aside>

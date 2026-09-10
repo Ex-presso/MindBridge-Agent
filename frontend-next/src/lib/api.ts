@@ -182,9 +182,9 @@ export const api = {
       ),
   },
   memory: {
-    get: (expectedUserId: string, limit = 50, offset = 0) =>
+    get: (expectedUserId: string, limit = 50, offset = 0, category?: "semantic" | "episodes") =>
       request<MemoryList>(
-        `/api/v1/memory?limit=${limit}&offset=${offset}`,
+        `/api/v1/memory?limit=${limit}&offset=${offset}${category ? `&category=${category}` : ""}`,
         {},
         true,
         expectedUserId,
