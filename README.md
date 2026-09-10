@@ -17,6 +17,19 @@ and consent-gated cross-session memory in a full-stack chat application.
 - **Evaluation:** frozen routing and safety benchmarks plus live API-level
   cross-session memory acceptance.
 
+## Screenshots
+
+<!-- demo.gif goes here once recorded: login -> streamed reply -> cross-session
+     recall -> memory consent off. See frontend-next/e2e/screenshots.mjs. -->
+
+| Streaming chat | Memory panel |
+|---|---|
+| ![Chat with a streamed assistant reply](docs/img/screenshot-chat.png) | ![Stored semantic facts and episodes with consent controls](docs/img/screenshot-memory.png) |
+
+Every stored fact and episode is inspectable in the memory panel, with a
+consent switch and one-click deletion. Settings cover encrypted
+bring-your-own-key providers ([screenshot](docs/img/screenshot-settings.png)).
+
 ## Architecture
 
 ```mermaid
@@ -66,7 +79,9 @@ extractor, and writes semantic and episodic memory. The lease is also the
 ownership token, so a crashed or stale worker cannot overwrite a newer claim.
 
 Interactive version: [memory write path](docs/img/skill/memory-write.html).
-Full invariants and scope are in [docs/MEMORY.md](docs/MEMORY.md).
+Full invariants and scope are in [docs/MEMORY.md](docs/MEMORY.md). Why the
+worker cannot double-write, with the mutation tests that back it up:
+[concurrency notes](docs/concurrency_notes.en.md).
 
 ## Quick Start
 
@@ -80,6 +95,16 @@ docker compose up -d
 Open [localhost:3000](http://localhost:3000), create an account, and add a model
 under **Settings**. API documentation is available at
 [localhost:8080/docs](http://localhost:8080/docs).
+
+The RAG tool needs its index built once, or retrieval runs against an empty
+collection:
+
+```bash
+docker compose exec backend /app/.venv/bin/python -m app.core.rag.vector_store
+```
+
+This downloads the MentalChat16K dataset and the Qwen3-Embedding-0.6B model
+(about 1.2 GB on first run), then embeds the corpus into pgvector.
 
 The default is DeepSeek V4 Flash through `openai_compatible`; enter your API key
 with `https://api.deepseek.com` and `deepseek-v4-flash` in **Settings**.
@@ -109,6 +134,11 @@ uv run --project ../backend python eval_routing.py --max-queries 3
 uv run --project ../backend python eval_memory.py --max-recall 1 --skip-gates
 ```
 
+The backend unit and integration suite (325 tests) runs in CI with line
+coverage reported by pytest-cov, alongside a Playwright smoke test that
+registers, configures a key, and receives a streamed reply through a local
+OpenAI-compatible stub.
+
 ## Repository
 
 ```text
@@ -122,6 +152,7 @@ docs/           Architecture, evaluation, and memory design
 
 - [Evaluation](docs/EVALUATION.md)
 - [Memory architecture](docs/MEMORY.md)
+- [Concurrency notes: outbox, leases, SKIP LOCKED](docs/concurrency_notes.en.md)
 
 ## License
 
