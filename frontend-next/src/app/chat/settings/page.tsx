@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { useApiKeys } from "@/hooks/useApiKeys";
 import { useAuth } from "@/hooks/useAuth";
 import { useMemory } from "@/hooks/useMemory";
@@ -275,9 +276,14 @@ export default function SettingsPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-lg font-semibold">API Keys</h1>
-            <p className="text-xs text-(--muted-foreground)">Configure your LLM provider keys. Keys are encrypted and stored securely.</p>
+            <h1 className="text-lg font-semibold">Settings</h1>
+            <p className="text-xs text-(--muted-foreground)">API keys, long-term memory, and account.</p>
           </div>
+        </div>
+
+        <div className="mb-4">
+          <h2 className="text-base font-semibold">API Keys</h2>
+          <p className="mt-1 text-xs leading-5 text-(--muted-foreground)">Configure your LLM provider keys. Keys are encrypted and stored securely.</p>
         </div>
 
         {keysLoading ? (
@@ -356,21 +362,24 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-(--border) pt-4">
-              <Button
-                size="sm"
-                variant={memoryEnabled ? "outline" : "default"}
-                onClick={handleMemoryToggle}
-                disabled={memoryLoading || memoryBusy !== null || (systemEnabled === false && memoryEnabled === false)}
-              >
-                {memoryBusy === "toggle"
-                  ? "Updating…"
-                  : memoryEnabled === null
-                    ? "Turn memory off"
-                  : memoryEnabled
-                    ? "Disable memory"
-                    : "Enable memory"}
-              </Button>
+            <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-(--border) pt-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <Switch
+                  checked={memoryEnabled === true}
+                  onCheckedChange={handleMemoryToggle}
+                  disabled={memoryLoading || memoryBusy !== null || (systemEnabled === false && memoryEnabled === false)}
+                  aria-label="Long-term memory"
+                />
+                <span className="text-xs text-(--muted-foreground)">
+                  {memoryBusy === "toggle"
+                    ? "Updating…"
+                    : memoryEnabled === null
+                      ? "Turn memory off"
+                    : memoryEnabled
+                      ? "Memory on"
+                      : "Memory off"}
+                </span>
+              </label>
 
               <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
                 <DialogTrigger asChild>

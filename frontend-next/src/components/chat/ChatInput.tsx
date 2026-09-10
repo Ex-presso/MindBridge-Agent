@@ -3,6 +3,13 @@ import { useRef, useState, KeyboardEvent } from "react";
 import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export interface ModelOption {
   id: string;
@@ -55,18 +62,20 @@ export function ChatInput({ onSend, isLoading, disabled, models = [] }: Props) {
       <div className="max-w-3xl mx-auto">
         {/* Model selector */}
         <div className="mb-2 flex items-center gap-2">
-          <select
-            value={selectedModel.id}
-            onChange={(e) => {
-              setSelectedModelId(e.target.value);
-            }}
-            className="text-xs border border-(--border) rounded px-2 py-1 bg-(--background) text-(--muted-foreground) cursor-pointer"
+          <Select
+            value={selectedModel.id || undefined}
+            onValueChange={setSelectedModelId}
+            disabled={models.length === 0}
           >
-            {models.length === 0 && <option value="">No API keys configured</option>}
-            {models.map((m) => (
-              <option key={`${m.provider}-${m.id}`} value={m.id}>{m.name}</option>
-            ))}
-          </select>
+            <SelectTrigger className="max-w-56 text-(--muted-foreground)" aria-label="Model">
+              <SelectValue placeholder="No API keys configured" />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((m) => (
+                <SelectItem key={`${m.provider}-${m.id}`} value={m.id}>{m.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {text.length > MAX * 0.8 && (
             <span className={cn("text-xs", text.length >= MAX ? "text-(--destructive)" : "text-(--muted-foreground)")}>
               {text.length}/{MAX}
