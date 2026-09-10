@@ -1,13 +1,23 @@
 "use client";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useAuthStore } from "@/stores/authStore";
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { accessToken, initialized } = useAuthStore();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerPathname, setDrawerPathname] = useState(pathname);
+
+  // Close the mobile drawer after navigating.
+  if (pathname !== drawerPathname) {
+    setDrawerPathname(pathname);
+    setDrawerOpen(false);
+  }
 
   useEffect(() => {
     if (initialized && !accessToken) {
@@ -30,8 +40,13 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
       <div className="hidden md:flex flex-col border-r border-(--border) bg-(--sidebar-bg)">
         <Sidebar />
       </div>
+      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <SheetContent title="Navigation" className="md:hidden">
+          <Sidebar />
+        </SheetContent>
+      </Sheet>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
+        <Header onMenuClick={() => setDrawerOpen(true)} />
         <main className="flex flex-1 flex-col overflow-hidden">{children}</main>
       </div>
     </div>
