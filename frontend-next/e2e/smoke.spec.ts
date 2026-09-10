@@ -47,6 +47,11 @@ test("register, configure a key, chat and stream a reply", async ({ page }) => {
     timeout: 30_000,
   });
 
+  // The URL swaps to the conversation route once the stream completes and the
+  // turn is persisted; reloading before that would land on the new-chat page.
+  await page.waitForURL(/\/chat\/[0-9a-f-]{36}$/, { timeout: 15_000 });
+  await expect(page.getByText(/Worked for /)).toBeVisible();
+
   // The conversation and both messages survive a reload (they were persisted).
   await page.reload();
   await expect(

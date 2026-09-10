@@ -1,50 +1,70 @@
 "use client";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Brain, User } from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { OptimisticMessage } from "@/types";
 import "highlight.js/styles/github.css";
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+/** Live seconds while the assistant works; "Worked for Xm Ys" once done. */
+function WorkTimer({ startedAt, completedAt }: { startedAt: number; completedAt?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (completedAt) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [completedAt]);
+
+  const elapsed = formatDuration((completedAt ?? now) - startedAt);
+  return (
+    <span className="text-xs tabular-nums text-(--muted-foreground)">
+      {completedAt ? `Worked for ${elapsed}` : elapsed}
+    </span>
+  );
+}
 
 interface Props {
   message: OptimisticMessage;
 }
 
 export function MessageBubble({ message }: Props) {
-  const isUser = message.role === "user";
+  if (message.role === "user") {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl justify-end px-4 py-3">
+        <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-(--primary) px-4 py-2.5 text-sm leading-relaxed text-(--primary-foreground)">
+          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={cn("flex gap-3 px-4 py-3 max-w-3xl mx-auto w-full", isUser && "flex-row-reverse")}>
-      {/* Avatar */}
-      <div className={cn(
-        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-medium",
-        isUser ? "bg-(--primary) text-(--primary-foreground)" : "bg-(--muted) text-(--muted-foreground)",
-      )}>
-        {isUser ? <User className="h-4 w-4" /> : <Brain className="h-4 w-4" />}
+    <div className="mx-auto w-full max-w-3xl px-4 py-3">
+      {/* Dashed separator with the work timer above its left end */}
+      <div className="mb-3">
+        {message.startedAt !== undefined && (
+          <div className="mb-1">
+            <WorkTimer startedAt={message.startedAt} completedAt={message.completedAt} />
+          </div>
+        )}
+        <div className="border-t border-dashed border-(--border)" />
       </div>
 
-      {/* Content */}
-      <div className={cn("flex flex-col gap-1 min-w-0 max-w-[85%]", isUser && "items-end")}>
-        <div className={cn(
-          "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-          isUser
-            ? "bg-(--primary) text-(--primary-foreground) rounded-tr-sm"
-            : "bg-(--muted) text-(--foreground) rounded-tl-sm",
-        )}>
-          {isUser ? (
-            <p className="whitespace-pre-wrap break-words">{message.content}</p>
-          ) : (
-            <div className="prose max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                {message.content || ""}
-              </ReactMarkdown>
-              {message.isStreaming && (
-                <span className="inline-block w-0.5 h-4 bg-current animate-pulse ml-0.5 align-middle" />
-              )}
-            </div>
-          )}
-        </div>
+      <div className="prose max-w-none text-sm leading-relaxed text-(--foreground)">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+          {message.content || ""}
+        </ReactMarkdown>
+        {message.isStreaming && (
+          <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current align-middle" />
+        )}
       </div>
     </div>
   );

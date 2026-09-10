@@ -29,6 +29,9 @@ export interface OptimisticMessage {
   role: "user" | "assistant";
   content: string;
   isStreaming?: boolean;
+  /** Set on assistant messages created this session; drives the work timer. */
+  startedAt?: number;
+  completedAt?: number;
 }
 
 export interface ApiKeyConfig {
