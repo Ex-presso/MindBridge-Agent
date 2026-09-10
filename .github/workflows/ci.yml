@@ -32,7 +32,7 @@ jobs:
         working-directory: backend
         run: |
           uv sync --locked
-          uv run pytest -q
+          uv run pytest -q --cov=app --cov-report=term
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -46,3 +46,66 @@ jobs:
           npm ci
           npm run lint
           npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: mindbridge
+          POSTGRES_PASSWORD: mindbridge_test
+          POSTGRES_DB: mindbridge
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U mindbridge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          version: "0.11.28"
+
+      - name: Start backend
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://mindbridge:mindbridge_test@localhost:5432/mindbridge
+          MEMORY_ENABLED: "false"
+          CORS_ORIGINS: '["http://localhost:3002"]'
+        run: |
+          uv sync --locked
+          nohup uv run python -m app.main > backend-e2e.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:8080/health
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend-next/package-lock.json
+
+      - name: Playwright smoke test
+        working-directory: frontend-next
+        env:
+          PW_API_URL: http://localhost:8080
+          PW_BASE_URL: http://localhost:3002
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Backend log on failure
+        if: failure()
+        run: cat backend/backend-e2e.log
