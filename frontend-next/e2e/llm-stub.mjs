@@ -122,6 +122,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`llm-stub listening on http://127.0.0.1:${PORT}`);
+const HOST = process.env.LLM_STUB_HOST ?? "127.0.0.1";
+server.listen(PORT, HOST, () => {
+  console.log(`llm-stub listening on http://${HOST}:${PORT}`);
 });

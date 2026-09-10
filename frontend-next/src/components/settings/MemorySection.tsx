@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowLeft, Brain, MessageSquare, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, Brain, MessageSquare, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,8 +105,7 @@ function EpisodeCard({ item }: { item: MemoryItem }) {
   );
 }
 
-export default function MemoryPage() {
-  const router = useRouter();
+export function MemorySection() {
   const userId = useAuthStore((state) => state.user?.id);
   const { memory, memoryLoading, setMemoryEnabled, clearMemory } = useMemory();
 
@@ -186,129 +184,120 @@ export default function MemoryPage() {
   const systemEnabled = memory?.system_enabled ?? true;
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-2xl px-4 py-6">
-        <div className="mb-6 flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/chat")} className="h-8 w-8">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="flex items-center gap-2 text-lg font-semibold">
-              <Brain className="h-4 w-4 text-(--primary)" aria-hidden="true" /> Memory
-            </h1>
-            <p className="text-xs text-(--muted-foreground)">
-              What MindBridge has saved to keep future conversations consistent. Everything here is inspectable and deletable.
-            </p>
-          </div>
-        </div>
+    <section aria-labelledby="memory-settings-title">
+      <div className="mb-4">
+        <h2 id="memory-settings-title" className="text-base font-semibold">Memory</h2>
+        <p className="mt-1 text-xs leading-5 text-(--muted-foreground)">
+          What MindBridge has saved to keep future conversations consistent. Everything here is inspectable and deletable.
+        </p>
+      </div>
 
-        <div className="mb-6 rounded-xl border border-(--border) bg-(--background) p-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex cursor-pointer items-center gap-2">
-              <Switch
-                checked={memoryEnabled}
-                onCheckedChange={handleToggle}
-                disabled={memoryLoading || busy !== null || !systemEnabled}
-                aria-label="Long-term memory"
-              />
-              <span className="text-sm font-medium">Long-term memory</span>
-            </label>
-            <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline" className="ml-auto text-(--destructive)" disabled={busy !== null}>
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Clear all
+      <div className="mb-6 rounded-xl border border-(--border) bg-(--background) p-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="flex cursor-pointer items-center gap-2">
+            <Switch
+              checked={memoryEnabled}
+              onCheckedChange={handleToggle}
+              disabled={memoryLoading || busy !== null || !systemEnabled}
+              aria-label="Long-term memory"
+            />
+            <span className="text-sm font-medium">Long-term memory</span>
+          </label>
+          <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline" className="ml-auto text-(--destructive)" disabled={busy !== null}>
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Clear all
+              </Button>
+            </DialogTrigger>
+            <DialogContent aria-describedby="clear-memory-description">
+              <DialogHeader>
+                <DialogTitle>Clear all stored memory?</DialogTitle>
+                <p id="clear-memory-description" className="text-sm leading-6 text-(--muted-foreground)">
+                  This permanently deletes everything MindBridge has saved about you and turns memory off. This action cannot be undone.
+                </p>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setClearDialogOpen(false)} disabled={busy === "clear"}>
+                  Cancel
                 </Button>
-              </DialogTrigger>
-              <DialogContent aria-describedby="clear-memory-description">
-                <DialogHeader>
-                  <DialogTitle>Clear all stored memory?</DialogTitle>
-                  <p id="clear-memory-description" className="text-sm leading-6 text-(--muted-foreground)">
-                    This permanently deletes everything MindBridge has saved about you and turns memory off. This action cannot be undone.
-                  </p>
-                </DialogHeader>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setClearDialogOpen(false)} disabled={busy === "clear"}>
-                    Cancel
-                  </Button>
-                  <Button variant="destructive" onClick={handleClear} disabled={busy === "clear"}>
-                    {busy === "clear" ? "Clearing…" : "Clear and disable"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
-          <p className="mt-2 text-xs leading-5 text-(--muted-foreground)">
-            {!systemEnabled
-              ? "Memory is disabled at the system level. Anything already stored can still be cleared."
-              : memoryEnabled
-              ? "Saving is on. Facts are only stored when you state them explicitly, and nothing is saved from conversations flagged as sensitive."
-              : "Saving is off. Existing items remain visible here until you clear them, but they are not used in conversations."}
+                <Button variant="destructive" onClick={handleClear} disabled={busy === "clear"}>
+                  {busy === "clear" ? "Clearing…" : "Clear and disable"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-(--muted-foreground)">
+          {!systemEnabled
+            ? "Memory is disabled at the system level. Anything already stored can still be cleared."
+            : memoryEnabled
+            ? "Saving is on. Facts are only stored when you state them explicitly, and nothing is saved from conversations flagged as sensitive."
+            : "Saving is off. Existing items remain visible here until you clear them, but they are not used in conversations."}
+        </p>
+      </div>
+
+      <div className="mb-4 flex items-center gap-1 rounded-lg bg-(--muted) p-1" role="tablist" aria-label="Memory category">
+        {CATEGORY_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            role="tab"
+            aria-selected={category === tab.value}
+            onClick={() => setCategory(tab.value)}
+            className={cn(
+              "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              category === tab.value
+                ? "bg-(--background) shadow-sm"
+                : "text-(--muted-foreground) hover:text-(--foreground)",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {listError ? (
+        <div className="rounded-xl border border-(--border) p-8 text-center text-sm text-(--muted-foreground)">
+          <p>{listError}</p>
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => loadPage(0, category)}>
+            Retry
+          </Button>
+        </div>
+      ) : items.length === 0 && !listLoading ? (
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-(--border) p-10 text-center">
+          <Brain className="h-8 w-8 text-(--muted-foreground) opacity-30" aria-hidden="true" />
+          <p className="text-sm font-medium">Nothing stored yet</p>
+          <p className="max-w-sm text-xs leading-5 text-(--muted-foreground)">
+            {memoryEnabled
+              ? "As you chat, MindBridge saves explicitly stated facts and short conversation synopses. They will appear here."
+              : "Turn on long-term memory and MindBridge will start saving context between conversations."}
           </p>
         </div>
-
-        <div className="mb-4 flex items-center gap-1 rounded-lg bg-(--muted) p-1" role="tablist" aria-label="Memory category">
-          {CATEGORY_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              role="tab"
-              aria-selected={category === tab.value}
-              onClick={() => setCategory(tab.value)}
-              className={cn(
-                "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                category === tab.value
-                  ? "bg-(--background) shadow-sm"
-                  : "text-(--muted-foreground) hover:text-(--foreground)",
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {listError ? (
-          <div className="rounded-xl border border-(--border) p-8 text-center text-sm text-(--muted-foreground)">
-            <p>{listError}</p>
-            <Button size="sm" variant="outline" className="mt-3" onClick={() => loadPage(0, category)}>
-              Retry
+      ) : (
+        <div className="flex flex-col gap-3">
+          {items.map((item) => {
+            const key = `${item.namespace.join("/")}/${item.key}`;
+            return itemCategory(item) === "episodes"
+              ? <EpisodeCard key={key} item={item} />
+              : <SemanticCard key={key} item={item} />;
+          })}
+          {listLoading && (
+            <div className="flex justify-center py-4">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-(--primary) border-t-transparent" />
+            </div>
+          )}
+          {hasMore && !listLoading && (
+            <Button variant="outline" size="sm" className="mx-auto" onClick={() => loadPage(items.length, category)}>
+              Load more
             </Button>
-          </div>
-        ) : items.length === 0 && !listLoading ? (
-          <div className="flex flex-col items-center gap-2 rounded-xl border border-(--border) p-10 text-center">
-            <Brain className="h-8 w-8 text-(--muted-foreground) opacity-30" aria-hidden="true" />
-            <p className="text-sm font-medium">Nothing stored yet</p>
-            <p className="max-w-sm text-xs leading-5 text-(--muted-foreground)">
-              {memoryEnabled
-                ? "As you chat, MindBridge saves explicitly stated facts and short conversation synopses. They will appear here."
-                : "Turn on long-term memory and MindBridge will start saving context between conversations."}
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {items.map((item) => {
-              const key = `${item.namespace.join("/")}/${item.key}`;
-              return itemCategory(item) === "episodes"
-                ? <EpisodeCard key={key} item={item} />
-                : <SemanticCard key={key} item={item} />;
-            })}
-            {listLoading && (
-              <div className="flex justify-center py-4">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-(--primary) border-t-transparent" />
-              </div>
-            )}
-            {hasMore && !listLoading && (
-              <Button variant="outline" size="sm" className="mx-auto" onClick={() => loadPage(items.length, category)}>
-                Load more
-              </Button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
-        {items.length === 0 && listLoading && (
-          <div className="flex justify-center py-10">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-(--primary) border-t-transparent" />
-          </div>
-        )}
-      </div>
-    </div>
+      {items.length === 0 && listLoading && (
+        <div className="flex justify-center py-10">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-(--primary) border-t-transparent" />
+        </div>
+      )}
+    </section>
   );
 }

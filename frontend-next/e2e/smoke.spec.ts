@@ -7,7 +7,10 @@ import { expect, test } from "@playwright/test";
  * and the LLM stub are managed by playwright.config.ts.
  */
 
-const STUB_BASE_URL = "http://127.0.0.1:8093/v1";
+// Where the BACKEND reaches the stub. With the backend on the host (CI) the
+// default works; with a dockerized backend pass
+// PW_STUB_URL=http://host.docker.internal:8093/v1 (and bind the stub to 0.0.0.0).
+const STUB_BASE_URL = process.env.PW_STUB_URL ?? "http://127.0.0.1:8093/v1";
 
 test("register, configure a key, chat and stream a reply", async ({ page }) => {
   const email = `smoke-${Date.now()}@example.com`;
@@ -51,7 +54,8 @@ test("register, configure a key, chat and stream a reply", async ({ page }) => {
   ).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("It sounds like things have been weighing on you")).toBeVisible();
 
-  // The memory panel renders with the consent switch.
-  await page.goto("/chat/memory");
+  // The memory panel renders in settings with the consent switch.
+  await page.goto("/chat/settings");
+  await page.getByRole("button", { name: "Memory" }).click();
   await expect(page.getByRole("switch", { name: "Long-term memory" })).toBeVisible();
 });

@@ -32,14 +32,16 @@ await page.goto(conversationId ? `${BASE}/chat/${conversationId}` : `${BASE}/cha
 await page.waitForTimeout(2000);
 await page.screenshot({ path: `${outDir}/screenshot-chat.png` });
 
-// 2. Memory panel.
-await page.goto(`${BASE}/chat/memory`);
-await page.waitForTimeout(1500);
-await page.screenshot({ path: `${outDir}/screenshot-memory.png` });
-
-// 3. Settings.
+// 2. Memory panel (inside settings).
 await page.goto(`${BASE}/chat/settings`);
 await page.waitForTimeout(1500);
+await page.getByRole("button", { name: "Memory" }).click();
+await page.waitForTimeout(1000);
+await page.screenshot({ path: `${outDir}/screenshot-memory.png` });
+
+// 3. Settings (model section).
+await page.getByRole("button", { name: "Model" }).click();
+await page.waitForTimeout(500);
 await page.screenshot({ path: `${outDir}/screenshot-settings.png` });
 
 await browser.close();
