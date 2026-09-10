@@ -146,6 +146,9 @@ def test_vector_setup_failure_retries_plain_store(monkeypatch):
     _reset_store()
     _FakeStore.fail_indexed_setup = True
     monkeypatch.setattr(memory_store.settings, "MEMORY_ENABLED", True)
+    # Pin the dims a local .env may override, so the probe passes and the
+    # failure under test stays the indexed setup itself.
+    monkeypatch.setattr(memory_store.settings, "MEMORY_EMBED_DIMS", 1024)
 
     runtime = asyncio.run(
         memory_store.initialize_memory_store(
