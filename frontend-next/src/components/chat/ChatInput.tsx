@@ -63,7 +63,7 @@ export function ChatInput({ onSend, isLoading, disabled, models = [] }: Props) {
         {/* Model selector */}
         <div className="mb-2 flex items-center gap-2">
           <Select
-            value={selectedModel.id || undefined}
+            value={selectedModel.id}
             onValueChange={setSelectedModelId}
             disabled={models.length === 0}
           >
@@ -102,6 +102,7 @@ export function ChatInput({ onSend, isLoading, disabled, models = [] }: Props) {
             onClick={submit}
             disabled={!text.trim() || isLoading || disabled}
             className="h-8 w-8 shrink-0 rounded-lg"
+            aria-label="Send"
           >
             <Send className="h-4 w-4" />
           </Button>
