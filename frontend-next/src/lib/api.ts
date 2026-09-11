@@ -13,6 +13,11 @@ import type {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 function apiErrorMessage(body: unknown, status: number): string {
+  // slowapi's 429 carries an "error" field instead of "detail"; either way the
+  // raw payload is not something a user should see.
+  if (status === 429) {
+    return "Too many requests. Please wait a moment and try again.";
+  }
   if (!body || typeof body !== "object" || !("detail" in body)) {
     return `HTTP ${status}`;
   }

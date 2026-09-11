@@ -68,6 +68,9 @@ export function useChat({
         });
 
         if (!res.ok) {
+          if (res.status === 429) {
+            throw new Error("Too many requests. Please wait a moment and try again.");
+          }
           const err = await res.json().catch(() => ({}));
           throw new Error((err as { detail?: string }).detail ?? `HTTP ${res.status}`);
         }
