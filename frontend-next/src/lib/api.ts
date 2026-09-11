@@ -110,16 +110,18 @@ async function request<T>(
 
 export const api = {
   auth: {
+    // retry=false: a 401 from these anonymous endpoints means bad credentials,
+    // not an expired session, and must not trigger the refresh-or-reload path.
     register: (data: { email: string; password: string; display_name?: string }) =>
       request<{ access_token: string }>("/api/v1/auth/register", {
         method: "POST",
         body: JSON.stringify(data),
-      }),
+      }, false),
     login: (data: { email: string; password: string }) =>
       request<{ access_token: string }>("/api/v1/auth/login", {
         method: "POST",
         body: JSON.stringify(data),
-      }),
+      }, false),
     logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
     me: () => request<User>("/api/v1/auth/me"),
     deleteAccount: (expectedUserId: string, password: string) =>

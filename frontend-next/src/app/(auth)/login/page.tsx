@@ -1,8 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { Brain } from "lucide-react";
-import { toast } from "sonner";
+import { Brain, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,14 +12,21 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
       await login(email, password);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Login failed");
+      const raw = err instanceof Error ? err.message : "";
+      setError(
+        /invalid credentials|401/i.test(raw)
+          ? "Incorrect email or password."
+          : raw || "Sign-in failed. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -47,6 +53,12 @@ export default function LoginPage() {
               <Label htmlFor="password">Password</Label>
               <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
             </div>
+            {error && (
+              <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-(--destructive)/10 px-3 py-2 text-xs text-(--destructive)">
+                <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                {error}
+              </p>
+            )}
             <Button type="submit" disabled={loading} className="w-full mt-1">
               {loading ? "Signing in…" : "Sign in"}
             </Button>
