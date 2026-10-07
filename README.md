@@ -45,7 +45,7 @@ flowchart LR
 
 The model chooses whether to retrieve examples. Application code controls
 crisis routing, memory eligibility, and persistence. See the
-[agent and memory workflows](docs/ARCHITECTURE.md) for the detailed paths.
+[architecture and design trade-offs](docs/ARCHITECTURE.md) for the detailed paths.
 
 ## Quick Start
 
@@ -90,13 +90,11 @@ reproduction commands, and limitations are in [Evaluation](docs/EVALUATION.md).
 
 CI runs backend tests, frontend lint/build, and a Playwright smoke test with
 a local model stub. Live model evaluations run separately. Real PostgreSQL
-concurrency tests are [opt-in](docs/MEMORY.md#verification).
+concurrency tests are [opt-in](docs/EVALUATION.md#postgresql-integration-checks).
 
 ## Documentation
 
-- [Agent and memory workflows](docs/ARCHITECTURE.md)
-- [Memory design, privacy controls, and limitations](docs/MEMORY.md)
-- [Outbox, leases, and concurrency tests](docs/concurrency_notes.en.md)
+- [Architecture, memory, and limitations](docs/ARCHITECTURE.md)
 - [Evaluation methods and results](docs/EVALUATION.md)
 
 ## License

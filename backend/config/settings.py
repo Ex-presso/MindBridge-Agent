@@ -22,12 +22,10 @@ class Settings(BaseSettings):
     RAG_CHUNK_OVERLAP: int = 100
     RAG_TOP_K: int = 3
 
-    # Long-conversation working-memory compaction (token-based, Claude Code
-    # autoCompact style; was message-count). Once the estimated token count of the
-    # working context exceeds COMPACT_TRIGGER_TOKENS, fold older turns into a running
-    # summary and prune them, keeping ~COMPACT_KEEP_RECENT_TOKENS of recent turns
-    # verbatim. Cheap-first: microCompact replaces old (re-derivable) tool results
-    # with a placeholder before paying for LLM summarization. See docs/MEMORY.md.
+    # Token-based compaction for long conversations. Above COMPACT_TRIGGER_TOKENS,
+    # summarize older turns and keep ~COMPACT_KEEP_RECENT_TOKENS of recent turns
+    # verbatim. Replace older tool results with placeholders before invoking
+    # summarization. See docs/ARCHITECTURE.md for the agent workflow.
     COMPACT_TRIGGER_TOKENS: int = 6000
     COMPACT_KEEP_RECENT_TOKENS: int = 2000
     COMPACT_MICRO_KEEP_RESULTS: int = 3  # keep the last N tool results verbatim

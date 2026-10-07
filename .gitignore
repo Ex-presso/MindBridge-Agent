@@ -68,3 +68,7 @@ product_plan.md
 docs/develop.md
 docs/system_arch.md
 docs/memory_design.md
+
+# Local-only documentation
+docs/MEMORY.md
+docs/concurrency_notes*.md

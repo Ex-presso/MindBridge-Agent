@@ -1,147 +1,115 @@
 # Evaluation
 
-## Release evidence
+## Archived results
 
-These results were generated on 2026-08-15 with `deepseek-v4-flash` through
-DeepSeek's OpenAI-compatible API.
+These runs were recorded on 2026-08-15 with `deepseek-v4-flash` through
+DeepSeek's OpenAI-compatible API. They cover the committed cases and do not
+establish general response quality or clinical effectiveness.
 
-| Capability | Frozen scope | Result |
-|---|---:|---:|
-| Conditional RAG routing | 45 scored hand-labeled cases | Precision **1.000**, recall **1.000**, F1 **1.000** |
-| Safety behavior | 20 required/forbidden-marker probes | **20/20 passed** |
-| Episodic memory | 6 paired cross-session scenarios | Memory on **6/6**, memory off **0/6** |
-| Semantic memory | 4 explicit fact kinds | Storage **4/4**, cross-session recall **4/4** |
-| Memory hard gates | 8 privacy, safety, isolation, deletion, and idempotency cases | **8/8 passed** |
+| Check | Scope | Result |
+|---|---|---|
+| Retrieval tool selection | 45 scored cases; 5 ambiguous cases excluded | 45/45 matched expected decisions; precision, recall, and F1 = 1.000 |
+| Safety response markers | 20 required/forbidden-phrase probes | 20/20 passed |
+| Cross-session memory | 12 on/off cases, 4 semantic cases, 8 behavior checks | 24/24 passed |
 
-All runners completed without execution errors. The scores apply only to the
-committed cases; they do not measure general mental-health quality.
+The runners reported no execution errors. The archived outputs are linked
+below; the current application may differ from the evaluated configuration.
 
-## 1. Conditional RAG routing
+## Retrieval tool selection
 
-The routing benchmark asks whether the LangGraph agent calls
-`fetch_mental_health_examples` once for a substantive mental-health support
-request and abstains for greetings, conversation closure, assistant-meta
-questions, and unrelated factual requests.
+The dataset contains 27 positive, 18 negative, and 5 ambiguous queries.
+Ambiguous cases remain in the raw output but are excluded from scoring. The
+evaluator runs the agent graph and inspects actual `AIMessage.tool_calls` for
+`fetch_mental_health_examples`. Execution errors invalidate a run.
 
-### Design
+The result is 27 true positives, 18 true negatives, and no false positives
+or false negatives. It measures whether to call the tool, not retrieval
+ranking or the quality of the eventual answer. The run used Qwen embeddings
+with an existing 1024-dimensional pgvector collection and `temperature=0`.
 
-- 50 hand-labeled queries: 27 positive, 18 negative, and 5 ambiguous.
-- Ambiguous cases remain in the raw output but are excluded from the headline
-  confusion matrix.
-- The full agent graph runs with `AgentRunContext`; the evaluator inspects
-  actual `AIMessage.tool_calls` and rejects any run containing an execution
-  error.
-- The RAG tool executes against PostgreSQL/pgvector. The configured Qwen
-  embedding matches the existing 1024-dimensional evaluation collection.
-- `temperature=0` is passed when the model is created.
+Evidence: [dataset](../evaluation/datasets/routing_benchmark.json),
+[configuration](../evaluation/configs/routing_eval.yaml),
+[results](../evaluation/results/routing_eval_results.csv),
+[summary](../evaluation/results/routing_eval_summary.csv).
 
-### Result
+## Safety response markers
 
-| n | TP | FP | FN | TN | Precision | Recall | F1 | Accuracy |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 45 | 27 | 0 | 0 | 18 | **1.000** | **1.000** | **1.000** | **1.000** |
+The probes cover self-harm, harm to others, diagnosis and medication requests,
+distress, boundary pressure, jailbreak attempts, and scope creep. Scoring
+checks required and forbidden phrases. All six self-harm or harm-to-others
+cases contained the expected crisis referral markers.
 
-This metric measures the binary tool-routing decision only. It does not measure
-retrieval ranking, response quality, or memory quality.
+For matched threats, the graph uses a separate response path with resource
+details and bypasses the retrieval loop. Passing the phrase checks does not
+establish that a response is clinically appropriate.
 
-Evidence:
+Evidence: [dataset](../evaluation/datasets/safety_probes.json),
+[configuration](../evaluation/configs/safety_eval.yaml),
+[results](../evaluation/results/safety_eval_results.csv),
+[summary](../evaluation/results/safety_eval_summary.csv).
 
-- `evaluation/results/routing_eval_results.csv`
-- `evaluation/results/routing_eval_summary.csv`
-- `evaluation/results/routing_eval_by_category.csv`
+## Cross-session memory
 
-## 2. Safety probes
+The runner uses disposable accounts and the public API, including chat
+persistence, the outbox worker, Store writes, and a new conversation. Recall
+was 6/6 with memory enabled and 0/6 with memory disabled, giving 12/12 expected
+on/off outcomes. Four explicit fact types passed storage and recall checks.
+The eight remaining cases cover consent, clearing, user isolation, crisis
+exclusion, relevance, rejected facts, duplicate delivery, and account deletion.
 
-The safety suite covers self-harm, harm-to-others, diagnosis requests,
-medication requests, minor distress, boundary pressure, jailbreak attempts,
-and scope creep. Each probe defines acceptable and forbidden response markers.
+DeepSeek handled chat and episode extraction. LM Studio served
+`text-embedding-nomic-embed-text-v1.5` at 768 dimensions for episode recall.
+Scoring uses expected phrase groups, stored evidence, and API state checks.
 
-### Result
-
-| Category | n | Pass rate | Crisis referral | Professional referral |
-|---|---:|---:|---:|---:|
-| Self-harm | 4 | **100%** | **100%** | **100%** |
-| Harm-to-others | 2 | **100%** | **100%** | **100%** |
-| All probes | 20 | **100%** | 35% | 35% |
-
-The overall referral percentages are not expected to be 100%: only crisis
-categories should receive crisis resources. The deterministic `safety_check`
-node runs before normal chat, bypasses the RAG loop for matched threats, and
-appends resource details independently of model wording.
-
-The marker rubric treats `mental health professional`, `crisis line`, and `988`
-as professional referrals. The phrase `take the weight off` is not treated as
-prescription advice.
-
-Evidence:
-
-- `evaluation/results/safety_eval_results.csv`
-- `evaluation/results/safety_eval_summary.csv`
-
-## 3. Memory product acceptance
-
-The memory benchmark uses the public API and disposable accounts. Each case
-passes through chat persistence, the transactional outbox, a leased worker,
-LangGraph Store, and a new conversation. DeepSeek performs chat and episode
-Extraction; LM Studio serves `text-embedding-nomic-embed-text-v1.5` at 768
-dimensions for episodic Selection.
-
-### Result
-
-| Metric | Result |
-|---|---:|
-| Episodic recall with memory on | **6/6** |
-| Episodic recall with memory off | **0/6** |
-| Grounded episodic storage | **6/6** |
-| Paired expected behavior | **12/12** |
-| Semantic storage and recall | **4/4** |
-| Privacy/safety/idempotency gates | **8/8** |
-| Overall acceptance | **24/24** |
-| Execution errors | **0/24** |
-
-The four Semantic kinds are explicit preference, goal, helpful strategy, and
-important person. The eight hard gates cover consent-off behavior, physical
-clear plus data-epoch invalidation, user isolation, crisis exclusion,
-irrelevant-memory rejection, semantic rejection, duplicate-delivery
-idempotency, and account deletion with Store cleanup.
-
-Evidence:
-
-- `evaluation/results/memory_eval_results.csv`
-- `evaluation/results/memory_eval_summary.csv`
+Evidence: [dataset](../evaluation/datasets/memory_benchmark.json),
+[configuration](../evaluation/configs/memory_eval.yaml),
+[results](../evaluation/results/memory_eval_results.csv),
+[summary](../evaluation/results/memory_eval_summary.csv).
 
 ## Limitations
 
 - The routing and safety sets are small and were labeled by one author.
-- DeepSeek is a hosted model name rather than an immutable model artifact; a
-  provider update can change generative behavior even with `temperature=0`.
-- Marker and expected-group scoring is auditable but lexical. Human review is
-  still required for clinical appropriateness and nuanced response quality.
-- The memory suite verifies supported behaviors and hard gates, not long-term
-  contradiction resolution. Conflict-aware Consolidation is not implemented.
-- A retrieval-ranking score is intentionally not reported until the optional IR
-  benchmark is rerun against the release configuration.
+- Hosted model behavior can change despite the same model name and temperature.
+- Phrase-based scoring needs human review for nuanced response quality.
+- The memory suite does not evaluate long-term contradiction resolution.
+- Retrieval ranking has not been reevaluated against the current application
+  configuration, so no ranking score is reported here.
 
-## Reproduction
+## Running checks
 
-Copy `backend/.env.example` to `backend/.env`, add a local
-`DEEPSEEK_API_KEY`, and start PostgreSQL. Routing and safety also require the
-configured pgvector collection to be populated with its matching embedding.
+### Live model benchmarks
+
+Add a local `DEEPSEEK_API_KEY` to `backend/.env` and start PostgreSQL. Routing
+and safety require the populated collection and matching embeddings specified
+in their configuration files. For memory, start the application with
+`MEMORY_ENABLED=true` and an embedding model whose dimensions match
+`MEMORY_EMBED_DIMS`. To reproduce the archived memory setup, use the 768-dimensional
+Nomic model through LM Studio. The runner configuration describes this setup
+but does not configure the backend's embedding service.
 
 ```bash
 cd evaluation
 uv run --project ../backend python eval_routing.py
 uv run --project ../backend python eval_safety.py
-```
-
-For memory acceptance, start the full application with
-`MEMORY_ENABLED=true`, run the configured LM Studio embedding model, and then
-execute:
-
-```bash
-uv run --project ../backend python eval_memory.py --max-recall 1 --skip-gates
 uv run --project ../backend python eval_memory.py
 ```
 
-The live runner paces disposable account creation and cleanup to stay within the
-configured authentication rate limit.
+Live runs call the configured model provider and overwrite result CSVs.
+They are separate from CI, which runs backend tests, frontend lint/build,
+and a Playwright smoke test with a local model stub.
+
+### PostgreSQL integration checks
+
+The database integration suite is skipped by default. Use a disposable,
+migrated database: its fixture deletes test accounts ending in `@example.com`.
+
+```bash
+docker run -d --name mindbridge-itest \
+  -e POSTGRES_USER=mindbridge -e POSTGRES_PASSWORD=itest \
+  -e POSTGRES_DB=mindbridge_itest -p 55432:5432 pgvector/pgvector:pg16
+
+cd backend
+export DATABASE_URL="postgresql+psycopg://mindbridge:itest@localhost:55432/mindbridge_itest"
+uv run alembic upgrade head
+RUN_LOCAL_INTEGRATION=1 uv run pytest tests/test_memory_postgres_integration.py
+```
