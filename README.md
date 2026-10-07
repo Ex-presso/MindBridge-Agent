@@ -2,33 +2,33 @@
 
 [![CI](https://github.com/Ex-presso/MindBridge-Agent/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/Ex-presso/MindBridge-Agent/actions/workflows/ci.yml)
 
-A stateful mental-health support agent built with FastAPI, LangGraph, and
-PostgreSQL. MindBridge combines conditional RAG, deterministic safety routing,
-and consent-gated cross-session memory in a full-stack chat application.
-
-## Highlights
-
-- **Stateful agent runtime:** bounded RAG tool routing, PostgreSQL checkpoints,
-  token-aware context compaction, and token-level SSE streaming.
-- **Long-term memory:** vector-selected episodes and explicit semantic facts,
-  with grounded extraction through a leased transactional outbox.
-- **Backend safety:** consistent row-lock ordering, idempotent workers,
-  deletion barriers, encrypted BYOK credentials, and retry-safe cleanup.
-- **Evaluation:** frozen routing and safety benchmarks plus live API-level
-  cross-session memory acceptance.
+A mental-health support chat application with a Next.js frontend and a
+FastAPI/LangGraph backend, backed by PostgreSQL. Users can resume conversations,
+enable memory across sessions, and inspect or clear what the application remembers.
 
 ## Screenshots
 
-<!-- demo.gif goes here once recorded: login -> streamed reply -> cross-session
-     recall -> memory consent off. See frontend-next/e2e/screenshots.mjs. -->
+Screenshots show fictional, seeded demo data; chat replies come from a local model stub.
 
-| Streaming chat | Memory panel |
+![Chat with a streamed assistant reply](docs/img/screenshot-chat.png)
+
+| Memory controls | Model settings |
 |---|---|
-| ![Chat with a streamed assistant reply](docs/img/screenshot-chat.png) | ![Stored semantic facts and episodes with consent controls](docs/img/screenshot-memory.png) |
+| ![Saved facts and conversation episodes](docs/img/screenshot-memory.png) | ![Configuration for compatible model providers](docs/img/screenshot-settings.png) |
 
-Every stored fact and episode is inspectable in the memory panel, with a
-consent switch and one-click deletion. Settings cover encrypted
-bring-your-own-key providers ([screenshot](docs/img/screenshot-settings.png)).
+## Features
+
+- **Resumable conversations:** PostgreSQL checkpoints, context compaction for
+  longer chats, and streamed replies.
+- **Conditional retrieval:** the agent can retrieve counselor-style examples
+  for support requests instead of adding retrieval to every turn.
+- **User-controlled memory:** explicit facts and relevant past episodes can
+  carry across conversations. Memory is off by default; saved items remain
+  inspectable and deletable when it is disabled.
+- **Background extraction:** durable jobs, retries, and consent checks keep
+  memory-extraction calls off the conversation request path.
+- **Compatible providers:** users bring their own API keys for OpenAI- or
+  Anthropic-compatible endpoints. Keys are encrypted at rest.
 
 ## Architecture
 
@@ -43,116 +43,61 @@ flowchart LR
     STORE -->|"semantic + episodic recall"| GRAPH
 ```
 
-### Agent graph
-
-<img alt="Safety check, summarization, and memory selection run deterministically on every eligible turn; only the chat-to-tool loop is decided by the model." src="docs/img/agent-graph.svg">
-
-Safety routing, context compaction, and memory selection are application
-decisions, so recall cannot be skipped by a model that declines to call a tool.
-The single graph-routing choice is whether the turn needs retrieval, measured at
-F1 = 1.000 on the frozen 45-case benchmark.
-
-Interactive version: [agent graph](docs/img/skill/agent-graph.html).
-
-## Memory
-
-Durable memory is written automatically, with memory policy kept outside model
-control:
-
-- **Selection** reads exact semantic facts and vector-ranked episodes before
-  each eligible turn; recalled content is treated as untrusted user data.
-- **Extraction** creates evidence-grounded episodes and promotes only explicit
-  user statements into semantic memory.
-- **Durability** moves LLM work off the request path through a PostgreSQL
-  transactional outbox, leased worker, and idempotent Store writes.
-- **Privacy** gates every read and write on consent, data epoch, revision, crisis
-  state, and deletion barriers. Memory is disabled by default.
-
-### Write path
-
-<img alt="The eligible assistant reply and outbox job commit atomically; a leased worker re-locks User, Conversation, and Job while it validates, extracts, and writes semantic and episodic memory." src="docs/img/memory-write.svg">
-
-The eligible assistant reply and outbox job commit atomically. A worker claims
-the job with `FOR UPDATE SKIP LOCKED`, then re-locks
-`User -> Conversation -> Job` while it revalidates privacy gates, calls the
-extractor, and writes semantic and episodic memory. The lease is also the
-ownership token, so a crashed or stale worker cannot overwrite a newer claim.
-
-Interactive version: [memory write path](docs/img/skill/memory-write.html).
-Full invariants and scope are in [docs/MEMORY.md](docs/MEMORY.md). Why the
-worker cannot double-write, with the mutation tests that back it up:
-[concurrency notes](docs/concurrency_notes.en.md).
+The model chooses whether to retrieve examples. Application code controls
+crisis routing, memory eligibility, and persistence. See the
+[agent and memory workflows](docs/ARCHITECTURE.md) for the detailed paths.
 
 ## Quick Start
 
-Requirements: Docker Compose and an LLM API or local OpenAI-compatible server.
+Requirements: Docker Compose and an LLM API or local compatible server.
 
 ```bash
 cp backend/.env.example backend/.env
 docker compose up -d
 ```
 
-Open [localhost:3000](http://localhost:3000), create an account, and add a model
-under **Settings**. API documentation is available at
-[localhost:8080/docs](http://localhost:8080/docs).
+Open [localhost:3000](http://localhost:3000), create an account, and configure
+a provider under **Settings → Model**. The default is DeepSeek through
+`openai_compatible`; for LM Studio, use
+`http://host.docker.internal:1234/v1` as the base URL.
 
-The RAG tool needs its index built once, or retrieval runs against an empty
-collection:
+Build the retrieval index once before using RAG:
 
 ```bash
 docker compose exec backend /app/.venv/bin/python -m app.core.rag.vector_store
 ```
 
-This downloads the MentalChat16K dataset and the Qwen3-Embedding-0.6B model
-(about 1.2 GB on first run), then embeds the corpus into pgvector.
+This downloads MentalChat16K and Qwen3-Embedding-0.6B (about 1.2 GB for the
+model on first use), then stores the embedded chunks in pgvector.
 
-The default is DeepSeek V4 Flash through `openai_compatible`; enter your API key
-with `https://api.deepseek.com` and `deepseek-v4-flash` in **Settings**.
-For LM Studio, choose `openai_compatible` and use
-`http://host.docker.internal:1234/v1`. Enable long-term memory with
-`MEMORY_ENABLED=true`; user consent remains off by default.
-
-Detailed setup, migrations, and memory safety: [docs/MEMORY.md](docs/MEMORY.md).
+For cross-session memory, set `MEMORY_ENABLED=true` in `backend/.env`,
+recreate the backend with `docker compose up -d backend`, and enable memory
+in the user's settings. API docs: [localhost:8080/docs](http://localhost:8080/docs).
 
 ## Evaluation
 
-All reported runs use frozen datasets committed to the repository. Full
-methodology and limitations are documented in
-[docs/EVALUATION.md](docs/EVALUATION.md).
+Archived results from 2026-08-15, using `deepseek-v4-flash`:
 
-| Capability | Frozen scope | Result |
-|---|---:|---|
-| RAG tool routing | 45 scored hand-labeled cases | Precision, recall, and F1 = **1.000** |
-| Safety behavior | 20 frozen probes | **20/20 passed**, including 6/6 crisis referrals |
-| Cross-session memory | 24 live API cases | **24/24 passed**: 6 episodic pairs, 4 semantic types, 8 hard gates |
+| Check | Scope | Result |
+|---|---|---|
+| Retrieval tool selection | 45 scored cases; 5 ambiguous cases recorded separately | 45/45 matched expected decisions |
+| Safety response markers | 20 probes with required and forbidden phrases | 20/20 passed |
+| Cross-session memory | 12 on/off cases, 4 semantic cases, 8 behavior checks | 24/24 passed |
 
-These scores cover only the listed cases.
+These are small, application-specific regression checks. They do not establish
+general answer quality or clinical effectiveness. Datasets, scoring methods,
+reproduction commands, and limitations are in [Evaluation](docs/EVALUATION.md).
 
-```bash
-cd evaluation
-uv run --project ../backend python eval_routing.py --max-queries 3
-uv run --project ../backend python eval_memory.py --max-recall 1 --skip-gates
-```
-
-The backend unit and integration suite (325 tests) runs in CI with line
-coverage reported by pytest-cov, alongside a Playwright smoke test that
-registers, configures a key, and receives a streamed reply through a local
-OpenAI-compatible stub.
-
-## Repository
-
-```text
-backend/        FastAPI, LangGraph, PostgreSQL, memory worker
-frontend-next/  Next.js chat and privacy controls
-evaluation/     Frozen benchmarks and reproducible runners
-docs/           Architecture, evaluation, and memory design
-```
+CI runs backend tests, frontend lint/build, and a Playwright smoke test with
+a local model stub. Live model evaluations run separately. Real PostgreSQL
+concurrency tests are [opt-in](docs/MEMORY.md#verification).
 
 ## Documentation
 
-- [Evaluation](docs/EVALUATION.md)
-- [Memory architecture](docs/MEMORY.md)
-- [Concurrency notes: outbox, leases, SKIP LOCKED](docs/concurrency_notes.en.md)
+- [Agent and memory workflows](docs/ARCHITECTURE.md)
+- [Memory design, privacy controls, and limitations](docs/MEMORY.md)
+- [Outbox, leases, and concurrency tests](docs/concurrency_notes.en.md)
+- [Evaluation methods and results](docs/EVALUATION.md)
 
 ## License
 
