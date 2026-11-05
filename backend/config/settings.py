@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     # Refresh-cookie Secure flag — must be True behind HTTPS in production.
     COOKIE_SECURE: bool = False
 
+    # Redis holds rate limit counters and the idempotency keys of background
+    # jobs. Unset, both fall back to per-process memory.
+    REDIS_URL: str | None = None
+
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 20
     # Stricter limit for auth endpoints (brute-force protection).
