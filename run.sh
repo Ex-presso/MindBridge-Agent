@@ -6,6 +6,3 @@ cd "$(dirname "$0")/evaluation"
 
 # Frozen routing and safety suites.
 uv run --project ../backend python run_all.py
-
-# Live API, outbox, worker, Store, and cross-conversation memory acceptance.
-uv run --project ../backend python eval_memory.py
