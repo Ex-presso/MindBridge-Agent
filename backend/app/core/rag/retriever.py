@@ -62,9 +62,21 @@ class ExampleRetriever:
         _verify_index()
         return cls(open_store(async_mode=True))
 
-    async def search(self, query: str, k: int) -> list[RetrievedExample]:
+    async def search(
+        self,
+        query: str,
+        k: int,
+        *,
+        min_similarity: float | None = None,
+    ) -> list[RetrievedExample]:
+        """Return up to k examples, best first, dropping those below the floor.
+
+        A nearest-neighbour search always returns k rows, however unrelated.
+        The floor keeps examples about a different concern out of the prompt.
+        """
+        floor = settings.RAG_MIN_SIMILARITY if min_similarity is None else min_similarity
         hits = await self._store.asimilarity_search_with_score(query, k=k)
-        return [
+        examples = [
             RetrievedExample(
                 id=example_id(document.page_content),
                 question=document.page_content,
@@ -74,6 +86,7 @@ class ExampleRetriever:
             )
             for document, distance in hits
         ]
+        return [example for example in examples if example.similarity >= floor]
 
 
 def _clip(text: str, limit: int) -> str:
@@ -103,11 +116,20 @@ _retriever: ExampleRetriever | None = None
 _lock = asyncio.Lock()
 
 
-async def search_examples(query: str, k: int | None = None) -> list[RetrievedExample]:
+async def search_examples(
+    query: str,
+    k: int | None = None,
+    *,
+    min_similarity: float | None = None,
+) -> list[RetrievedExample]:
     """Search with one retriever shared by the whole process."""
     global _retriever
     if _retriever is None:
         async with _lock:
             if _retriever is None:
                 _retriever = await asyncio.to_thread(ExampleRetriever.open)
-    return await _retriever.search(query, k or settings.RAG_TOP_K)
+    return await _retriever.search(
+        query,
+        k or settings.RAG_TOP_K,
+        min_similarity=min_similarity,
+    )

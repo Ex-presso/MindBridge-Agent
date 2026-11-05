@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     # counselor's full answer; only the question is embedded.
     RAG_COLLECTION: str = "mental_health_qa"
     RAG_TOP_K: int = 3
+    # Matches below this cosine similarity are dropped. Calibrated for the
+    # default embedding model on the routing benchmark: the best match scored
+    # at least 0.58 for each of the 27 support requests and at most 0.56 for
+    # ten unrelated factual questions. Recalibrate after changing the model.
+    RAG_MIN_SIMILARITY: float = 0.55
     # Questions are cut to this length before embedding (99% are shorter than 2,200).
     RAG_QUESTION_MAX_CHARS: int = 2000
     # Cap on each answer returned to the model (the median answer is about 2,200).
