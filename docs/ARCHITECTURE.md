@@ -73,6 +73,19 @@ transaction. Processing holds locks across the extraction call, so consent
 changes, deletion, and other operations on the affected rows can wait for it
 to finish. This is a throughput and latency trade-off in the current design.
 
+## Observability
+
+| Signal | Where | Use |
+|---|---|---|
+| Request id | `X-Request-ID` response header and every log line | Join the log lines of one request |
+| Metrics | `GET /metrics`, Prometheus format | Latency by route, time to first token, token usage, model call latency, retrieval outcomes |
+| Traces | OTLP/HTTP export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set | One trace per request, with a span for each model call and retrieval |
+
+Logs, metric labels, and span attributes carry identifiers, counts, and
+scores, never message text. Metric labels take values from fixed sets such
+as route templates and provider names; model names appear only on spans.
+`docker compose --profile observability up -d` starts Jaeger and Prometheus.
+
 ## Current limitations
 
 - Crisis detection and memory content filters use English patterns. They can

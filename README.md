@@ -29,6 +29,8 @@ Screenshots show fictional, seeded demo data; chat replies come from a local mod
   memory-extraction calls off the conversation request path.
 - **Compatible providers:** users bring their own API keys for OpenAI- or
   Anthropic-compatible endpoints. Keys are encrypted at rest.
+- **Observability:** request ids in logs, Prometheus metrics, and optional
+  OpenTelemetry traces, none of which carry message text.
 
 ## Architecture
 
