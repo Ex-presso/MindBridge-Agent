@@ -1,31 +1,10 @@
-"""Chat service — orchestrates agent invocation for both legacy and session-aware endpoints."""
-from collections.abc import AsyncGenerator, Sequence
+"""Chat service: invokes the agent for the session-aware endpoint."""
+from collections.abc import AsyncGenerator
 from contextlib import aclosing
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 from app.core.agent.agent import Agent, EpisodeEligibilityGuard
-from app.schemas.conversation import ChatMessage
-
-
-def convert_message(message: ChatMessage) -> BaseMessage:
-    role = message.role
-    content = message.content
-    if role == "system":
-        return SystemMessage(content=content)
-    if role == "user":
-        return HumanMessage(content=content)
-    return AIMessage(content=content)
-
-
-async def run_chat_legacy(agent: Agent, history: Sequence[ChatMessage]) -> str:
-    """Stateless: takes full message history. Used by the legacy /chat/completions endpoint."""
-    if not history:
-        raise ValueError("At least one message is required.")
-    messages = [convert_message(m) for m in history]
-    if not any(isinstance(m, HumanMessage) for m in messages):
-        raise ValueError("History must contain at least one user message.")
-    return await agent.ainvoke_legacy(messages)
 
 
 async def run_chat_session(

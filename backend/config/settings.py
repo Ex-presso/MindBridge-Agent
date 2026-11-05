@@ -107,10 +107,6 @@ class Settings(BaseSettings):
     # Stricter limit for auth endpoints (brute-force protection).
     AUTH_RATE_LIMIT: str = "5/minute"
 
-    # Feature flags
-    # Legacy /chat/completions is unauthenticated and uses system keys — off by
-    # default; enable only for a trusted local OpenAI-compatible client.
-    ENABLE_LEGACY_CHAT_ENDPOINT: bool = False
     # Legacy flag name: safely adopt create_all databases and upgrade Alembic to
     # head on startup (dev/Docker convenience). Run migrations explicitly in prod.
     AUTO_CREATE_TABLES: bool = True

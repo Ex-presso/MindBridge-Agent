@@ -734,23 +734,6 @@ class Agent:
         graph.add_edge("use_tool", "chat")
         return graph
 
-    def invoke(self, messages: Sequence[BaseMessage]) -> str:
-        """
-        Synchronous invoke for backward compatibility.
-        Invoke the agent with the system prompt and messages.
-        """
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(self.ainvoke_legacy(messages))
-
-    async def ainvoke_legacy(self, messages: Sequence[BaseMessage]) -> str:
-        """Stateless invocation (no checkpointer) — takes full message history."""
-        state: State = {"messages": list(messages), "tool_iterations": 0}
-        result = await self.app.ainvoke(state, context=AgentRunContext())
-        ai_msg = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage)), None)
-        if ai_msg is None:
-            raise RuntimeError("Agent produced no assistant message.")
-        return self._normalize_content(ai_msg.content)
-
     @staticmethod
     def _accumulate_usage(usage_sink: dict | None, message: Any) -> None:
         """Add a message's token usage into usage_sink (input/output/total).

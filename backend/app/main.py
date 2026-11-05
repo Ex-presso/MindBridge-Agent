@@ -138,27 +138,6 @@ async def lifespan(app: FastAPI):
         )
     app.state.memory_worker_task = memory_worker_task
 
-    # 3. Create system agents (only for providers with keys in .env — used by legacy endpoint)
-    from app.core.agent.agent import Agent
-    app.state.stateless_agents = {}
-    app.state.stateful_agents = {}
-
-    if settings.OPENAI_API_KEY:
-        try:
-            app.state.stateless_agents["openai"] = Agent("openai", checkpointer=None)
-            app.state.stateful_agents["openai"] = Agent("openai", checkpointer=checkpointer, store=store)
-            logger.info("OpenAI system agent created.")
-        except Exception as e:
-            logger.warning("Failed to create OpenAI agent: %s", e)
-
-    if settings.GEMINI_API_KEY:
-        try:
-            app.state.stateless_agents["google_genai"] = Agent("google_genai", checkpointer=None)
-            app.state.stateful_agents["google_genai"] = Agent("google_genai", checkpointer=checkpointer, store=store)
-            logger.info("Google GenAI system agent created.")
-        except Exception as e:
-            logger.warning("Failed to create Google agent: %s", e)
-
     logger.info("MindBridge backend ready.")
     try:
         yield
@@ -211,7 +190,6 @@ async def health_detail(request: Request):
             if request.app.state.memory_vector_enabled
             else "key_value"
         ),
-        "agents": list(request.app.state.stateful_agents.keys()),
     }
 
 
