@@ -1,0 +1,11 @@
+# Retrieval ranking benchmark for the question/answer knowledge base.
+# The index, embedding model, top-k and similarity floor come from backend settings.
+
+benchmark_path: "datasets/ir_benchmark.json"
+top_k_eval: [1, 3, 5, 10]
+
+# LLM that rewrites sampled client questions into search queries (build step only).
+llm_provider: "openai_compatible"
+llm_model: "deepseek-v4-flash"
+llm_base_url: "https://api.deepseek.com"
+llm_api_key_env: "DEEPSEEK_API_KEY"
