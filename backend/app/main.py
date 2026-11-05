@@ -15,6 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api import router
 from app.core.observability.context import RequestIdLogFilter, RequestIdMiddleware
 from app.core.observability.metrics import MetricsMiddleware
+from app.core.observability.tracing import configure_tracing
 from app.core.rate_limit import limiter
 from config.settings import settings
 
@@ -55,7 +56,7 @@ def configure_logging() -> None:
         root_logger.addHandler(handler)
 
 
-def configure_tracing() -> None:
+def configure_langsmith() -> None:
     """Export LangSmith settings to os.environ so LangChain/LangGraph pick them up.
 
     LangChain reads tracing config from the process environment, but this app
@@ -77,7 +78,7 @@ def configure_tracing() -> None:
 
 
 configure_logging()
-configure_tracing()
+configure_langsmith()
 logger = logging.getLogger(__name__)
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -165,6 +166,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+configure_tracing(app)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

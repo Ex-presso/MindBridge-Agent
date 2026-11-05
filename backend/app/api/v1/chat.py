@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from app.core.auth.deps import get_current_user
 from app.core.agent.safety import CRISIS_DETECTOR_VERSION, detect_crisis
 from app.core.observability.metrics import CHAT_FIRST_TOKEN_SECONDS, record_chat_turn
+from app.core.observability.tracing import annotate_chat_span
 from app.db.engine import get_db
 from app.db.models.user import User
 from app.db.repositories import (
@@ -388,6 +389,7 @@ async def session_chat(
 
     thread_id = str(conv.id)
     conv_id_str = str(conv.id)
+    annotate_chat_span(conv_id_str, provider, body.model)
 
     if body.stream:
         async def stream_response() -> AsyncGenerator[bytes, None]:

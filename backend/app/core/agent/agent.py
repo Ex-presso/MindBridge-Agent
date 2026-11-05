@@ -501,8 +501,9 @@ class Agent:
         llm_input.extend(working_messages)
 
         try:
-            with observe_llm_call("chat"):
+            with observe_llm_call("chat") as span:
                 response = await self.llm.ainvoke(llm_input)
+                span.set_attribute("llm.tool_calls", len(response.tool_calls))
         except Exception as exc:
             # Some provider exceptions include a repr of the complete request.
             # LangGraph persists node failures in checkpoint pending_writes, so

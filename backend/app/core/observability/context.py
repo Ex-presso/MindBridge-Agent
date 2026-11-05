@@ -11,6 +11,8 @@ import re
 import uuid
 from contextvars import ContextVar, Token
 
+from app.core.observability.tracing import current_trace_id
+
 _HEADER = b"x-request-id"
 # A caller-supplied id is echoed into logs, so only accept a plain token.
 _SAFE_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
@@ -32,10 +34,15 @@ def reset_request_id(token: Token[str]) -> None:
 
 
 class RequestIdLogFilter(logging.Filter):
-    """Copies the current id onto each record so the formatter can print it."""
+    """Copies the request id and trace id onto each record for the formatter.
+
+    The trace id is what you paste into the tracing UI to open the request
+    that produced a log line.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = _request_id.get()
+        record.trace_id = current_trace_id()
         return True
 
 

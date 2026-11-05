@@ -12,6 +12,7 @@ from app.core.observability.metrics import (
     RAG_SEARCHES,
     RAG_TOP_SIMILARITY,
 )
+from app.core.observability.tracing import tracer
 from app.core.rag.knowledge_base import example_id, open_store, read_index_state
 from config.settings import settings
 
@@ -81,24 +82,28 @@ class ExampleRetriever:
         The floor keeps examples about a different concern out of the prompt.
         """
         floor = settings.RAG_MIN_SIMILARITY if min_similarity is None else min_similarity
-        started = time.perf_counter()
-        hits = await self._store.asimilarity_search_with_score(query, k=k)
-        RAG_SEARCH_SECONDS.observe(time.perf_counter() - started)
-        examples = [
-            RetrievedExample(
-                id=example_id(document.page_content),
-                question=document.page_content,
-                answer=document.metadata.get("answer", ""),
-                # pgvector returns cosine distance; similarity is its complement.
-                similarity=1.0 - distance,
-            )
-            for document, distance in hits
-        ]
-        served = [example for example in examples if example.similarity >= floor]
-        if examples:
-            RAG_TOP_SIMILARITY.observe(examples[0].similarity)
-        RAG_SEARCHES.labels("served" if served else "empty").inc()
-        return served
+        with tracer.start_as_current_span("rag.search") as span:
+            started = time.perf_counter()
+            hits = await self._store.asimilarity_search_with_score(query, k=k)
+            RAG_SEARCH_SECONDS.observe(time.perf_counter() - started)
+            examples = [
+                RetrievedExample(
+                    id=example_id(document.page_content),
+                    question=document.page_content,
+                    answer=document.metadata.get("answer", ""),
+                    # pgvector returns cosine distance; similarity is its complement.
+                    similarity=1.0 - distance,
+                )
+                for document, distance in hits
+            ]
+            served = [example for example in examples if example.similarity >= floor]
+            if examples:
+                RAG_TOP_SIMILARITY.observe(examples[0].similarity)
+                span.set_attribute("rag.top_similarity", round(examples[0].similarity, 4))
+            span.set_attribute("rag.floor", floor)
+            span.set_attribute("rag.served", len(served))
+            RAG_SEARCHES.labels("served" if served else "empty").inc()
+            return served
 
 
 def _clip(text: str, limit: int) -> str:

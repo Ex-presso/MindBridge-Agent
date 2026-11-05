@@ -89,8 +89,11 @@ class Settings(BaseSettings):
     LOG_FILE: str = "app.log"
     LOG_MAX_BYTES: int = 1000000
     LOG_BACKUP_COUNT: int = 5
-    # request_id is added to every record by RequestIdLogFilter.
-    LOG_FORMAT: str = "%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s"
+    # request_id and trace_id are added to every record by RequestIdLogFilter.
+    LOG_FORMAT: str = (
+        "%(asctime)s %(levelname)s [req=%(request_id)s trace=%(trace_id)s] "
+        "%(name)s: %(message)s"
+    )
 
     # Auth
     SECRET_KEY: str = "change-me-in-production-use-32-random-bytes"
@@ -125,6 +128,12 @@ class Settings(BaseSettings):
     LANGSMITH_API_KEY: SecretStr | None = None
     LANGSMITH_PROJECT: str = "mindbridge"
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
+
+    # OpenTelemetry tracing (optional, off by default). Point this at the
+    # OTLP/HTTP port of a collector such as Jaeger (http://localhost:4318) to
+    # export one trace per request.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
+    OTEL_SERVICE_NAME: str = "mindbridge-backend"
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent.parent / ".env",
