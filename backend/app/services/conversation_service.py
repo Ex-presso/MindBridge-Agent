@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.agent.agent import Agent
 from app.db.models.conversation import Conversation
 from app.db.repositories import conversation_repo, message_repo
-from app.services.memory_service import episode_namespace
+from app.services import memory_service
 
 
 async def create_conversation(db: AsyncSession, *, user_id: uuid.UUID, model: str | None = None, provider: str | None = None) -> Conversation:
@@ -60,7 +60,6 @@ async def delete_conversation(
     user_id: uuid.UUID,
     *,
     checkpointer,
-    store,
 ) -> bool:
     # This row lock is shared with chat generation. If a run is active, deletion
     # waits for its final checkpoint; if deletion wins, a later run re-check sees
@@ -72,7 +71,7 @@ async def delete_conversation(
     # External stores use autocommit and cannot share the SQLAlchemy transaction.
     # Delete them first and propagate failures. Every operation is idempotent, so
     # a partial failure is safe to retry while the relational row still exists.
-    await store.adelete(episode_namespace(user_id), str(conv_id))
+    await memory_service.delete_conversation_memories(user_id, conv_id)
     await checkpointer.adelete_thread(str(conv_id))
     return await conversation_repo.delete_by_id(db, conv_id)
 

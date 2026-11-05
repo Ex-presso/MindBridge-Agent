@@ -102,7 +102,6 @@ async def delete_me(
                 await account_service.delete_account(
                     db,
                     user.id,
-                    store=getattr(request.app.state, "store", None),
                     checkpointer=getattr(request.app.state, "checkpointer", None),
                 )
         except account_service.AccountUserNotFoundError as exc:

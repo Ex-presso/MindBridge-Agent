@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -118,17 +118,7 @@ async def lifespan(app: FastAPI):
     app.state.checkpointer = checkpointer
     app.state.pg_pool = pool
 
-    # 2b. LangGraph Store: user-scoped cross-thread memory. With memory enabled,
-    #     initialize a summary vector index for episode Selection. Embedding/index
-    #     failure falls back to KV so inspection and deletion stay available.
-    from app.services.memory_store import initialize_memory_store
-
-    memory_runtime = await initialize_memory_store(pool)
-    store = memory_runtime.store
-    app.state.store = store
-    app.state.memory_vector_enabled = memory_runtime.vector_enabled
-
-    # 2c. A single lightweight leased worker drains extraction and privacy
+    # 2b. A single lightweight leased worker drains extraction and privacy
     # deletion jobs. SKIP LOCKED keeps this safe if the API is later replicated.
     memory_worker_stop = asyncio.Event()
     memory_worker_task = None
@@ -193,16 +183,11 @@ async def health():
 
 
 @app.get("/health", tags=["Health"])
-async def health_detail(request: Request):
+async def health_detail():
     return {
         "status": "ok",
         "database": "connected",
         "checkpointer": "ready",
-        "memory_store": (
-            "vector"
-            if request.app.state.memory_vector_enabled
-            else "key_value"
-        ),
     }
 
 

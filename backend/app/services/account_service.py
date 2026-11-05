@@ -21,13 +21,12 @@ async def delete_account(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
-    store: Any,
     checkpointer: Any,
 ) -> int:
     """Delete all user data, retaining a disabled row on external failure.
 
     Phase one commits the consent/version tombstone. Phase two locks User first,
-    then every Conversation in stable UUID order, clears Store and checkpoints,
+    then every Conversation in stable UUID order, clears memories and checkpoints,
     and only then removes the relational User (whose FKs cascade). Every
     external operation is idempotent, so a partial failure is safe to retry.
     """
@@ -49,10 +48,10 @@ async def delete_account(
         # transaction from forming the reverse Conversation → Job edge.
         await memory_job_repo.cancel_unfinished_for_user(db, user_id)
 
-        if store is None or checkpointer is None:
+        if checkpointer is None:
             raise AccountDeletionError("Account storage cleanup is unavailable.")
 
-        await memory_service.delete_user_memory_items(store, user_id)
+        await memory_service.delete_user_memories(user_id)
         for conversation in conversations:
             try:
                 await checkpointer.adelete_thread(str(conversation.id))

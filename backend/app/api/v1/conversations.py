@@ -39,8 +39,7 @@ async def delete_conversation(
     db: AsyncSession = Depends(get_db),
 ):
     checkpointer = getattr(request.app.state, "checkpointer", None)
-    store = getattr(request.app.state, "store", None)
-    if checkpointer is None or store is None:
+    if checkpointer is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Conversation storage is unavailable.",
@@ -50,7 +49,6 @@ async def delete_conversation(
         conversation_id,
         user.id,
         checkpointer=checkpointer,
-        store=store,
     )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")

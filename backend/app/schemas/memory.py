@@ -1,23 +1,16 @@
 """Public contracts for inspecting, consenting to, and deleting memory."""
 
-from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-MemoryCategory = Literal["semantic", "episodes"]
-
-
 class MemoryItemResponse(BaseModel):
-    """A transparent representation of one LangGraph Store item."""
-
-    namespace: list[str]
-    key: str
-    value: dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
-    score: float | None = None
+    id: str
+    text: str
+    # The conversation the memory was extracted from.
+    conversation_id: str | None
+    created_at: str | None
 
 
 class MemoryListResponse(BaseModel):
