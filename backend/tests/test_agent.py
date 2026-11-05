@@ -97,3 +97,24 @@ def test_agent_closes_langgraph_event_stream_on_consumer_disconnect():
         assert closed.is_set()
 
     asyncio.run(scenario())
+
+
+def test_tool_limit_answers_every_pending_call_under_its_own_id():
+    """Regression: the limit notice used one fixed id, which providers reject."""
+    agent = Agent(_ExplodingLLM(), checkpointer=None)
+    pending = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "fetch_mental_health_examples", "args": {"query": "a"}, "id": "call_a"},
+            {"name": "fetch_mental_health_examples", "args": {"query": "b"}, "id": "call_b"},
+        ],
+    )
+    state = {
+        "messages": [HumanMessage(content="hi"), pending],
+        "tool_iterations": agent._max_tool_calls,
+    }
+
+    result = asyncio.run(agent._tool_node(state))
+
+    assert [message.tool_call_id for message in result["messages"]] == ["call_a", "call_b"]
+    assert result["tool_iterations"] == agent._max_tool_calls + 1

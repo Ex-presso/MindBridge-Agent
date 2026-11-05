@@ -540,22 +540,25 @@ class Agent:
 
         current_iterations = state.get("tool_iterations", 0)
         if current_iterations >= self._max_tool_calls:
-            logger.warning(
-                "Tool invocation limit reached (%s). Returning error message.",
-                self._max_tool_calls,
-            )
-            limit_message = ToolMessage(
-                content=(
-                    "Tool invocation limit reached; proceeding without additional retrieval."
-                ),
-                tool_call_id="fetch_mental_health_examples_limit",
-                status="error",
-            )
+            logger.warning("Tool invocation limit reached (%s).", self._max_tool_calls)
+            # Answer every pending call under its own id: a provider rejects the
+            # next request if any tool call has no matching result.
+            limit_messages = [
+                ToolMessage(
+                    content=(
+                        "Retrieval limit reached for this turn. "
+                        "Answer with the examples already retrieved."
+                    ),
+                    tool_call_id=self._unwrap_tool_call(call)[2],
+                    status="error",
+                )
+                for call in last_ai_message.tool_calls
+            ]
             return cast(
                 State,
                 {
-                    "messages": [limit_message],
-                    "tool_iterations": current_iterations,
+                    "messages": limit_messages,
+                    "tool_iterations": current_iterations + 1,
                 },
             )
 
@@ -634,13 +637,12 @@ class Agent:
         latest = state["messages"][-1] if state["messages"] else None
         current_iterations = state.get("tool_iterations", 0)
         if isinstance(latest, AIMessage) and latest.tool_calls:
-            if current_iterations >= self._max_tool_calls:
-                logger.warning(
-                    "Routing decision: tool call requested but limit %s reached; sending to tool node for error.",
-                    self._max_tool_calls,
-                )
-            else:
-                logger.info("Routing decision: tool call detected, moving to tool node.")
+            # Past the limit the tool node still runs: it answers the pending
+            # calls with a limit notice instead of retrieving again.
+            logger.info(
+                "Routing decision: tool call detected (iteration %s), moving to tool node.",
+                current_iterations,
+            )
             return "use_tool"
         logger.info("Routing decision: no tool call, finishing response.")
         return "finish"
