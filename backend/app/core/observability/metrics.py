@@ -70,6 +70,13 @@ MEMORY_JOBS = Counter(
     "Background memory jobs by outcome; error means the attempt will be retried.",
     ["operation", "outcome"],
 )
+# How far the worker is behind: a rising lag means jobs arrive faster than
+# they are processed.
+MEMORY_JOB_LAG_SECONDS = Histogram(
+    "memory_job_lag_seconds",
+    "Time from a turn being saved to its memory job starting.",
+    buckets=(0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 1800),
+)
 MEMORY_JOB_SECONDS = Histogram(
     "memory_job_duration_seconds",
     "Time to process one background memory job.",

@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from app.core.auth.deps import get_current_user
 from app.core.agent.safety import CRISIS_DETECTOR_VERSION, detect_crisis
 from app.core.observability.metrics import CHAT_FIRST_TOKEN_SECONDS, record_chat_turn
-from app.core.observability.tracing import annotate_chat_span
+from app.core.observability.tracing import annotate_chat_span, current_trace_carrier
 from app.db.engine import get_db
 from app.db.models.user import User
 from app.db.repositories import (
@@ -73,6 +73,15 @@ def _conversation_guard(db, user_id: uuid.UUID):
     return guard
 
 
+def _job_payload(task: MemoryTask) -> dict:
+    """The task plus what the worker needs to report on it.
+
+    The trace context lets the job's span join this request's trace; the
+    timestamp lets the worker measure how long the job waited.
+    """
+    return {**task.to_payload(), "trace": current_trace_carrier(), "queued_at": time.time()}
+
+
 async def _enqueue_extraction(
     db,
     *,
@@ -108,7 +117,7 @@ async def _enqueue_extraction(
         provider=provider,
         model=model,
     )
-    await outbox_repo.add(db, task.event_type, task.to_payload())
+    await outbox_repo.add(db, task.event_type, _job_payload(task))
 
 
 def _get_agent(
@@ -375,7 +384,7 @@ async def session_chat(
             user_id=str(user.id),
             conversation_id=str(conv.id),
         )
-        await outbox_repo.add(db, task.event_type, task.to_payload())
+        await outbox_repo.add(db, task.event_type, _job_payload(task))
     await conversation_repo.touch(db, conv.id, model=body.model, provider=provider)
     await db.commit()
     outbox_relay.notify()

@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, fields
 from typing import Any
 
 from aio_pika.abc import AbstractIncomingMessage
+from opentelemetry.trace import StatusCode
 from redis.exceptions import RedisError
 
 from app.core.auth.encryption import decrypt_value
@@ -28,8 +29,12 @@ from app.core.llm.provider import get_llm
 from app.core.memory import MemoryClient, get_memory_client
 from app.core.messaging import JobQueue, attempt_of
 from app.core.observability.context import bind_request_id, reset_request_id
-from app.core.observability.metrics import MEMORY_JOB_SECONDS, MEMORY_JOBS
-from app.core.observability.tracing import tracer
+from app.core.observability.metrics import (
+    MEMORY_JOB_LAG_SECONDS,
+    MEMORY_JOB_SECONDS,
+    MEMORY_JOBS,
+)
+from app.core.observability.tracing import context_from_carrier, tracer
 from app.core.redis_client import get_redis
 from app.db.repositories import (
     api_key_repo,
@@ -214,7 +219,8 @@ async def _release(job_id: str, *, done: bool) -> None:
 async def _consume(session_factory: Any, queue: JobQueue, message: AbstractIncomingMessage) -> None:
     """Process one delivery, then acknowledge, retry or bury it."""
     try:
-        task = MemoryTask.from_payload(json.loads(message.body))
+        payload = json.loads(message.body)
+        task = MemoryTask.from_payload(payload)
     except Exception:
         # Retrying cannot fix a payload that does not parse.
         MEMORY_JOBS.labels("unknown", "invalid").inc()
@@ -235,48 +241,54 @@ async def _consume(session_factory: Any, queue: JobQueue, message: AbstractIncom
     log_token = bind_request_id(f"job-{message.message_id}")
     started = time.perf_counter()
     outcome = "error"
-    try:
-        with tracer.start_as_current_span(
-            "memory.job",
-            record_exception=False,
-            set_status_on_exception=False,
-        ) as span:
-            span.set_attribute("memory.operation", task.operation)
-            span.set_attribute("memory.attempt", attempt_of(message))
+    # Retries wait on purpose, so only a first attempt measures the backlog.
+    if attempt_of(message) == 1 and isinstance(payload.get("queued_at"), (int, float)):
+        MEMORY_JOB_LAG_SECONDS.observe(max(0.0, time.time() - payload["queued_at"]))
+    with tracer.start_as_current_span(
+        "memory.job",
+        # Continue the trace of the chat request that queued this job.
+        context=context_from_carrier(payload.get("trace")),
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        span.set_attribute("memory.operation", task.operation)
+        span.set_attribute("memory.attempt", attempt_of(message))
+        try:
             memory = await get_memory_client()
             outcome = await handle_task(session_factory, memory, task)
+            await _release(message.message_id, done=True)
+            await message.ack()
+            logger.info("Memory job finished; operation=%s outcome=%s", task.operation, outcome)
+        except asyncio.CancelledError:
+            # Shutdown: the unacknowledged message is redelivered later.
+            await _release(message.message_id, done=False)
+            raise
+        except Exception as exc:
+            # The error class only: a provider error can echo the user's message.
+            logger.warning(
+                "Memory job failed; operation=%s attempt=%s error_type=%s",
+                task.operation,
+                attempt_of(message),
+                type(exc).__name__,
+            )
+            span.set_status(StatusCode.ERROR)
+            await _release(message.message_id, done=False)
+            # A deletion is a privacy promise, so it is retried without limit.
+            exhausted = (
+                task.operation == "extract"
+                and attempt_of(message) >= settings.MEMORY_WORKER_MAX_ATTEMPTS
+            )
+            if exhausted:
+                outcome = "dead"
+                await queue.bury(message)
+            else:
+                outcome = "retry"
+                await queue.retry_later(message)
+        finally:
             span.set_attribute("memory.outcome", outcome)
-        await _release(message.message_id, done=True)
-        await message.ack()
-        logger.info("Memory job finished; operation=%s outcome=%s", task.operation, outcome)
-    except asyncio.CancelledError:
-        # Shutdown: the unacknowledged message is redelivered later.
-        await _release(message.message_id, done=False)
-        raise
-    except Exception as exc:
-        # The error class only: a provider error can echo the user's message.
-        logger.warning(
-            "Memory job failed; operation=%s attempt=%s error_type=%s",
-            task.operation,
-            attempt_of(message),
-            type(exc).__name__,
-        )
-        await _release(message.message_id, done=False)
-        # A deletion is a privacy promise, so it is retried without limit.
-        exhausted = (
-            task.operation == "extract"
-            and attempt_of(message) >= settings.MEMORY_WORKER_MAX_ATTEMPTS
-        )
-        if exhausted:
-            outcome = "dead"
-            await queue.bury(message)
-        else:
-            outcome = "retry"
-            await queue.retry_later(message)
-    finally:
-        MEMORY_JOBS.labels(task.operation, outcome).inc()
-        MEMORY_JOB_SECONDS.labels(task.operation).observe(time.perf_counter() - started)
-        reset_request_id(log_token)
+            MEMORY_JOBS.labels(task.operation, outcome).inc()
+            MEMORY_JOB_SECONDS.labels(task.operation).observe(time.perf_counter() - started)
+            reset_request_id(log_token)
 
 
 async def _run_consumer(session_factory: Any, queue: JobQueue) -> None:

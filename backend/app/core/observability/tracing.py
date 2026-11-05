@@ -10,7 +10,8 @@ conversations here are sensitive.
 
 from __future__ import annotations
 
-from opentelemetry import trace
+from opentelemetry import propagate, trace
+from opentelemetry.context import Context
 
 from config.settings import settings
 
@@ -61,3 +62,18 @@ def annotate_chat_span(conversation_id: str, provider: str, model: str) -> None:
             "llm.model": model,
         }
     )
+
+
+def current_trace_carrier() -> dict[str, str]:
+    """The active trace context in W3C form, to travel with a queued job.
+
+    Empty when tracing is off.
+    """
+    carrier: dict[str, str] = {}
+    propagate.inject(carrier)
+    return carrier
+
+
+def context_from_carrier(carrier: dict[str, str] | None) -> Context:
+    """Rebuild the trace context a job was queued under."""
+    return propagate.extract(carrier or {})
