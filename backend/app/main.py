@@ -7,11 +7,14 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api import router
 from app.core.observability.context import RequestIdLogFilter, RequestIdMiddleware
+from app.core.observability.metrics import MetricsMiddleware
 from app.core.rate_limit import limiter
 from config.settings import settings
 
@@ -174,10 +177,17 @@ app.add_middleware(
     expose_headers=["X-Conversation-Id", "X-Request-ID"],
     max_age=86400,
 )
+app.add_middleware(MetricsMiddleware)
 # Added last so it wraps everything above, including CORS preflight handling.
 app.add_middleware(RequestIdMiddleware)
 
 app.include_router(router, prefix="/api")
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    """Scraped by Prometheus. Unauthenticated, so keep it on an internal network."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/", status_code=200, tags=["Health"])
