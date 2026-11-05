@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.rag.knowledge_base import open_store
+from app.core.rag.knowledge_base import example_id, open_store
 from config.settings import settings
 
 _QUESTION_DISPLAY_CHARS = 500
@@ -36,7 +36,7 @@ class ExampleRetriever:
         hits = await self._store.asimilarity_search_with_score(query, k=k)
         return [
             RetrievedExample(
-                id=str(document.id),
+                id=example_id(document.page_content),
                 question=document.page_content,
                 answer=document.metadata.get("answer", ""),
                 # pgvector returns cosine distance; similarity is its complement.

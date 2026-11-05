@@ -19,8 +19,10 @@ from app.core.embeddings import get_embeddings
 from config.settings import settings
 
 DATASET_NAME = "ShenLab/MentalChat16K"
-# Fixed namespace: an example keeps the same id across rebuilds, so evaluation
-# gold labels that refer to ids stay valid.
+# An example's id is derived from its question, so it is the same in every
+# collection and after every rebuild; evaluation gold labels refer to it. It is
+# not used as the pgvector row id: that key is unique across all collections,
+# so two collections holding the same example would overwrite each other.
 _ID_NAMESPACE = uuid.UUID("6f1d3c52-8f0e-4b7a-9d55-2c1a7e4b9a10")
 
 
@@ -106,8 +108,7 @@ def build_index(
                 [
                     Document(page_content=item.question, metadata={"answer": item.answer})
                     for item in batch
-                ],
-                ids=[item.id for item in batch],
+                ]
             )
     except Exception:
         # A half-built collection would answer searches with partial results.
