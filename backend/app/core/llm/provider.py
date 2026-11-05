@@ -84,8 +84,8 @@ def get_llm(
 ) -> BaseChatModel:
     """Create a chat model for the given provider.
 
-    When api_key is provided, it is used directly (per-user keys).
-    When api_key is None, falls back to system-wide keys from settings.
+    Callers pass the user's own key. With api_key=None the provider SDK falls
+    back to its own environment variable.
     """
     provider = provider.lower()
     resolved_temperature = (
@@ -93,10 +93,6 @@ def get_llm(
     )
 
     if provider in ("openai", "openai_compatible"):
-        key = api_key
-        if not key and settings.OPENAI_API_KEY:
-            key = settings.OPENAI_API_KEY.get_secret_value()
-
         resolved_model = model or (
             settings.DEFAULT_LLM_MODEL
             if provider == "openai_compatible"
@@ -122,8 +118,8 @@ def get_llm(
             kwargs["metadata"] = {
                 STRUCTURED_OUTPUT_METHOD_METADATA_KEY: "function_calling"
             }
-        if key:
-            kwargs["api_key"] = key
+        if api_key:
+            kwargs["api_key"] = api_key
         if resolved_base_url:
             kwargs["base_url"] = resolved_base_url
         model_class = (
@@ -149,16 +145,12 @@ def get_llm(
     elif provider == "google_genai":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        key = api_key
-        if not key and settings.GEMINI_API_KEY:
-            key = settings.GEMINI_API_KEY.get_secret_value()
-
         kwargs = {
             "model": model or settings.GEMINI_MODEL,
             "temperature": resolved_temperature,
         }
-        if key:
-            kwargs["api_key"] = key
+        if api_key:
+            kwargs["api_key"] = api_key
         return ChatGoogleGenerativeAI(**kwargs)
 
     else:

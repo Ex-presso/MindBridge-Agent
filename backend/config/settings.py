@@ -12,8 +12,6 @@ class Settings(BaseSettings):
     DEFAULT_LLM_BASE_URL: str = "https://api.deepseek.com"
     OPENAI_MODEL: str = "gpt-5"
     GEMINI_MODEL: str = "gemini-2.5-flash"
-    OPENAI_API_KEY: SecretStr | None = None
-    GEMINI_API_KEY: SecretStr | None = None
     MODEL_TEMPERATURE: float = 0.3
 
     # RAG settings. The current retrieval benchmark must be rerun before these
@@ -49,7 +47,7 @@ class Settings(BaseSettings):
     MEMORY_WORKER_LEASE_SECONDS: int = Field(default=90, ge=35, le=600)
     MEMORY_WORKER_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=10)
 
-    # Embedding settings: "sentence_transformers", "local" (LM Studio / Ollama), or "gemini"
+    # Embedding settings: "sentence_transformers" or "local" (LM Studio / Ollama)
     EMBEDDING_PROVIDER: str = "sentence_transformers"
     EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
     EMBEDDING_BASE_URL: str = "http://localhost:1234/v1"

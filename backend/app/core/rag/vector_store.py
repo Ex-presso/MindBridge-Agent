@@ -34,7 +34,6 @@ def get_embeddings() -> Embeddings:
     Supports:
       - "sentence_transformers": Local model via sentence-transformers (recommended)
       - "local": OpenAI-compatible API (LM Studio, Ollama, etc.)
-      - "gemini": Google Generative AI embeddings
     """
     provider = settings.EMBEDDING_PROVIDER.lower()
 
@@ -85,13 +84,6 @@ def get_embeddings() -> Embeddings:
             api_key=SecretStr("lm-studio"),  # LM Studio doesn't need a real key
             # Send plain strings: LM Studio rejects tiktoken token-ID batches.
             check_embedding_ctx_length=False,
-        )
-    elif provider == "gemini":
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
-        return GoogleGenerativeAIEmbeddings(
-            model=settings.EMBEDDING_MODEL or "gemini-embedding-001",
-            google_api_key=settings.GEMINI_API_KEY,
         )
     else:
         raise ValueError(f"Unknown embedding provider: {provider}")

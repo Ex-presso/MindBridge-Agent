@@ -24,7 +24,6 @@ from app.core.agent.safety import (
     detect_crisis,
     with_crisis_resources,
 )
-from app.core.llm.provider import get_llm
 from app.services.memory_selection import render_memory_context, select_memory
 from app.services.rag import get_retriever
 from config.settings import settings
@@ -86,12 +85,7 @@ class AgentRunContext:
 class Agent:
     """LangGraph-driven mental health agent with conditional RAG tool usage."""
 
-    def __init__(self, provider_or_llm, checkpointer=None, store=None):
-        if isinstance(provider_or_llm, str):
-            base_llm = get_llm(provider_or_llm)
-        else:
-            base_llm = provider_or_llm
-
+    def __init__(self, base_llm, checkpointer=None, store=None):
         self.system_prompt = """
         You are a compassionate mental health assistant practicing Rogerian (person-centered) therapy principles.
 
