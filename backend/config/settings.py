@@ -14,11 +14,14 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-2.5-flash"
     MODEL_TEMPERATURE: float = 0.3
 
-    # RAG settings. The current retrieval benchmark must be rerun before these
-    # production defaults are presented as an evaluated optimum.
-    RAG_CHUNK_SIZE: int = 2000
-    RAG_CHUNK_OVERLAP: int = 100
+    # RAG. Each indexed item is one client question from MentalChat16K with the
+    # counselor's full answer; only the question is embedded.
+    RAG_COLLECTION: str = "mental_health_qa"
     RAG_TOP_K: int = 3
+    # Questions are cut to this length before embedding (99% are shorter than 2,200).
+    RAG_QUESTION_MAX_CHARS: int = 2000
+    # Cap on each answer returned to the model (the median answer is about 2,200).
+    RAG_ANSWER_MAX_CHARS: int = 2000
 
     # Token-based compaction for long conversations. Above COMPACT_TRIGGER_TOKENS,
     # summarize older turns and keep ~COMPACT_KEEP_RECENT_TOKENS of recent turns
@@ -66,7 +69,6 @@ class Settings(BaseSettings):
     # after a blocked row lock is released. Do not make this configurable to a
     # snapshot isolation level without adding a credential epoch protocol.
     DATABASE_ISOLATION_LEVEL: Literal["READ COMMITTED"] = "READ COMMITTED"
-    PGVECTOR_COLLECTION: str = "mental_health_docs"
 
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]  # => backend/
 

@@ -18,9 +18,6 @@ temperature: 0.0            # deterministic routing
 # (they are still recorded so reviewers can inspect the model's choice).
 score_ambiguous: false
 
-# Use an existing pgvector collection so we don't need to build a new index.
-# Any populated collection works — retrieval quality doesn't affect the
-# routing decision we measure here, only whether the tool was invoked.
-pgvector_collection: "ir_eval_cs1000_co100"
+# The RAG tool searches the knowledge base collection from backend settings.
 embedding_provider: "sentence_transformers"
 embedding_model: "Qwen/Qwen3-Embedding-0.6B"

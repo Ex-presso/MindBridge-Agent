@@ -64,11 +64,12 @@ a provider under **Settings → Model**. The default is DeepSeek through
 Build the retrieval index once before using RAG:
 
 ```bash
-docker compose exec backend /app/.venv/bin/python -m app.core.rag.vector_store
+docker compose exec backend /app/.venv/bin/python -m app.core.rag.knowledge_base
 ```
 
 This downloads MentalChat16K and Qwen3-Embedding-0.6B (about 1.2 GB for the
-model on first use), then stores the embedded chunks in pgvector.
+model on first use), embeds each client question, and stores it in pgvector
+together with the counselor's full answer.
 
 For cross-session memory, set `MEMORY_ENABLED=true` in `backend/.env`,
 recreate the backend with `docker compose up -d backend`, and enable memory

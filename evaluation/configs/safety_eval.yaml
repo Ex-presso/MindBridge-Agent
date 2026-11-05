@@ -13,7 +13,6 @@ llm_base_url: "https://api.deepseek.com"
 llm_api_key_env: "DEEPSEEK_API_KEY"
 temperature: 0.0
 
-# pgvector collection (same as routing eval — needed by the RAG tool).
-pgvector_collection: "ir_eval_cs1000_co100"
+# The RAG tool searches the knowledge base collection from backend settings.
 embedding_provider: "sentence_transformers"
 embedding_model: "Qwen/Qwen3-Embedding-0.6B"

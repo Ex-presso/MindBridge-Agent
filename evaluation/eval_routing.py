@@ -46,9 +46,6 @@ def _apply_eval_overrides() -> None:
         return
     with cfg_path.open() as f:
         cfg = yaml.safe_load(f) or {}
-    coll = cfg.get("pgvector_collection")
-    if coll:
-        os.environ["PGVECTOR_COLLECTION"] = coll
     embedding_provider = cfg.get("embedding_provider")
     if embedding_provider:
         os.environ["EMBEDDING_PROVIDER"] = embedding_provider
@@ -64,18 +61,6 @@ _apply_eval_overrides()
 
 from app.core.agent.agent import Agent, AgentRunContext  # noqa: E402
 from app.core.llm.provider import get_llm  # noqa: E402
-from config.settings import settings  # noqa: E402
-
-# Belt-and-suspenders: confirm the override won the resolution race against
-# any transitive .env-based settings load that may have happened above.
-import os as _os  # noqa: E402
-
-if _os.environ.get("PGVECTOR_COLLECTION"):
-    assert settings.PGVECTOR_COLLECTION == _os.environ["PGVECTOR_COLLECTION"], (
-        f"Collection override leaked: settings={settings.PGVECTOR_COLLECTION!r} "
-        f"but env={_os.environ['PGVECTOR_COLLECTION']!r}. A backend module was "
-        "imported before _apply_collection_override() ran."
-    )
 
 logger = logging.getLogger(__name__)
 

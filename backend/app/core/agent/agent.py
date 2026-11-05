@@ -25,7 +25,7 @@ from app.core.agent.safety import (
     with_crisis_resources,
 )
 from app.services.memory_selection import render_memory_context, select_memory
-from app.services.rag import get_retriever
+from app.core.rag.retriever import format_examples, search_examples
 from config.settings import settings
 
 if TYPE_CHECKING:
@@ -125,44 +125,29 @@ class Agent:
         """Create the tool set exposed to the LLM."""
 
         async def fetch_mental_health_examples(query: str) -> str:
-            logger.info("RAG tool invoked with raw query=%r", query)
             normalized_query = self._normalize_content(query).strip()
             if not normalized_query:
-                logger.info("RAG tool received empty query after normalization.")
-                return "No relevant counselor examples found because the query was empty."
+                return "No counselor examples were retrieved because the query was empty."
 
-            retriever = await get_retriever(k=self._rag_top_k)
+            examples = await search_examples(normalized_query, k=self._rag_top_k)
+            # Counts and scores only: the query is the user's concern in their own words.
             logger.info(
-                "RAG retriever invoked with top_k=%s; normalized_query=%r",
-                self._rag_top_k,
-                normalized_query,
+                "RAG retrieved %s example(s); similarities=%s",
+                len(examples),
+                [round(example.similarity, 3) for example in examples],
             )
-            results = await retriever.ainvoke(normalized_query)
-
-            if not results:
-                logger.info("RAG returned zero documents.")
+            if not examples:
                 return "No similar counseling examples were retrieved."
-
-            snippets: list[str] = []
-            for idx, doc in enumerate(results, start=1):
-                content = doc.page_content.strip()
-                if content:
-                    snippets.append(f"[Example {idx}]\n{content}")
-
-            if not snippets:
-                logger.info("RAG results contained no non-empty snippets.")
-                return "No similar counseling examples were retrieved."
-
-            logger.info("RAG tool assembled %s snippets.", len(snippets))
-            return "\n\n".join(snippets)
+            return format_examples(examples)
 
         description = (
-            "Retrieve counselor-style examples from the mental health knowledge base. "
+            "Search a knowledge base of past client concerns paired with a counselor's response. "
             "Call this tool once before answering any substantive request about emotions, distress, relationships, "
             "coping strategies, or other mental health topics. Do not call it for greetings, conversation closure, "
             "questions about the assistant itself, or unrelated factual requests. "
-            "Pass a self-contained `query` that captures the user's concern in full — resolve pronouns and references to "
-            "earlier messages (e.g. 'it', 'that') so the query stands on its own for retrieval."
+            "Pass a self-contained `query` that restates the user's concern in the first person, the way a client "
+            "would describe it. Resolve pronouns and references to earlier messages (e.g. 'it', 'that') so the "
+            "query stands on its own for retrieval."
         )
 
         rag_tool = StructuredTool.from_function(
