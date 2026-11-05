@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     MEMORY_EPISODE_TOPIC_MAX_CHARS: int = Field(default=80, ge=10, le=500)
     MEMORY_CONTEXT_MAX_CHARS: int = Field(default=4000, ge=500, le=20000)
     MEMORY_EMBED_DIMS: int = Field(default=1024, ge=1)
+    # pgvector table that mem0 creates and owns.
+    MEMORY_COLLECTION: str = "memories"
     # One lightweight in-process outbox worker. It remains enabled when the
     # memory kill switch is off so previously queued privacy deletions still run.
     MEMORY_WORKER_ENABLED: bool = True
