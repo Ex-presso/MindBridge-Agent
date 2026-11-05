@@ -136,12 +136,7 @@ async def lifespan(app: FastAPI):
         from app.services.memory_worker import run_memory_worker
 
         memory_worker_task = asyncio.create_task(
-            run_memory_worker(
-                AsyncSessionLocal,
-                store,
-                vector_enabled=memory_runtime.vector_enabled,
-                stop_event=memory_worker_stop,
-            ),
+            run_memory_worker(AsyncSessionLocal, stop_event=memory_worker_stop),
             name="memory-worker",
         )
     app.state.memory_worker_task = memory_worker_task

@@ -1,16 +1,11 @@
 """LLM provider factory — creates chat model instances."""
 
-import json
-from typing import Any
 from urllib.parse import urlparse
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from config.settings import settings
-
-STRUCTURED_OUTPUT_METHOD_METADATA_KEY = "mindbridge_structured_output_method"
-
 
 # Available models per provider (shown to user in frontend)
 PROVIDER_MODELS: dict[str, list[dict[str, str]]] = {
@@ -32,48 +27,6 @@ PROVIDER_MODELS: dict[str, list[dict[str, str]]] = {
 }
 
 
-class _OpenAICompatibleChatOpenAI(ChatOpenAI):
-    """Adapt structured JSON misplaced in compatible reasoning responses."""
-
-    def _create_chat_result(
-        self,
-        response: Any,
-        generation_info: dict[str, Any] | None = None,
-    ) -> Any:
-        result = super()._create_chat_result(response, generation_info)
-        choices = getattr(response, "choices", None)
-        if not isinstance(choices, list):
-            return result
-
-        for choice, generation in zip(choices, result.generations, strict=False):
-            provider_message = getattr(choice, "message", None)
-            if provider_message is None or not hasattr(provider_message, "parsed"):
-                continue
-            if getattr(provider_message, "parsed", None) is not None:
-                continue
-            if getattr(provider_message, "content", None) not in (None, ""):
-                continue
-            if getattr(provider_message, "refusal", None):
-                continue
-
-            reasoning_content = getattr(
-                provider_message,
-                "reasoning_content",
-                None,
-            )
-            if not isinstance(reasoning_content, str):
-                continue
-            try:
-                recovered = json.loads(reasoning_content)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(recovered, dict):
-                continue
-            generation.message.additional_kwargs["parsed"] = recovered
-
-        return result
-
-
 def get_llm(
     provider: str,
     *,
@@ -81,6 +34,7 @@ def get_llm(
     base_url: str | None = None,
     model: str | None = None,
     temperature: float | None = None,
+    timeout: float | None = None,
 ) -> BaseChatModel:
     """Create a chat model for the given provider.
 
@@ -115,22 +69,14 @@ def get_llm(
             "stream_usage": True,
         }
         if is_deepseek:
-            # DeepSeek thinking mode rejects the forced tool choice used by
-            # LangChain's function-calling structured-output path.
             kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-            kwargs["metadata"] = {
-                STRUCTURED_OUTPUT_METHOD_METADATA_KEY: "function_calling"
-            }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         if api_key:
             kwargs["api_key"] = api_key
         if resolved_base_url:
             kwargs["base_url"] = resolved_base_url
-        model_class = (
-            _OpenAICompatibleChatOpenAI
-            if provider == "openai_compatible"
-            else ChatOpenAI
-        )
-        return model_class(**kwargs)
+        return ChatOpenAI(**kwargs)
 
     elif provider in ("anthropic", "anthropic_compatible"):
         from langchain_anthropic import ChatAnthropic
@@ -139,6 +85,8 @@ def get_llm(
             "model": model or "claude-sonnet-4-5",
             "temperature": resolved_temperature,
         }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         if api_key:
             kwargs["api_key"] = api_key
         if base_url:
@@ -152,6 +100,8 @@ def get_llm(
             "model": model or settings.GEMINI_MODEL,
             "temperature": resolved_temperature,
         }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         if api_key:
             kwargs["api_key"] = api_key
         return ChatGoogleGenerativeAI(**kwargs)

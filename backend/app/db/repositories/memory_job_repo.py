@@ -166,39 +166,6 @@ async def get_processing_for_update(
     return result.scalar_one_or_none()
 
 
-async def list_extract_source_user_ids(
-    db: AsyncSession,
-    *,
-    user_id: uuid.UUID,
-    conversation_id: uuid.UUID,
-    consent_version: int,
-    data_epoch: int,
-    after_revision: int,
-    through_revision: int,
-    limit: int = 40,
-) -> tuple[uuid.UUID, ...]:
-    """Return consented successful-turn sources needed for a rolling draft."""
-    result = await db.execute(
-        select(MemoryJob.source_user_message_id)
-        .where(
-            MemoryJob.operation == "extract_episode",
-            MemoryJob.user_id == user_id,
-            MemoryJob.conversation_id == conversation_id,
-            MemoryJob.consent_version == consent_version,
-            MemoryJob.data_epoch == data_epoch,
-            MemoryJob.target_revision > after_revision,
-            MemoryJob.target_revision <= through_revision,
-            MemoryJob.source_user_message_id.is_not(None),
-            MemoryJob.status.in_(
-                ("pending", "processing", "retry", "succeeded", "superseded")
-            ),
-        )
-        .order_by(MemoryJob.target_revision.desc())
-        .limit(limit)
-    )
-    return tuple(reversed(result.scalars().all()))
-
-
 async def finish_claim(
     db: AsyncSession,
     *,

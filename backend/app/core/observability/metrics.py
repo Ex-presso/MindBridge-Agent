@@ -65,6 +65,17 @@ RAG_TOP_SIMILARITY = Histogram(
     "Similarity of the best match, before the floor is applied.",
     buckets=(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
 )
+MEMORY_JOBS = Counter(
+    "memory_jobs_total",
+    "Background memory jobs by outcome; error means the attempt will be retried.",
+    ["operation", "outcome"],
+)
+MEMORY_JOB_SECONDS = Histogram(
+    "memory_job_duration_seconds",
+    "Time to process one background memory job.",
+    ["operation"],
+    buckets=_SLOW_BUCKETS,
+)
 
 
 def record_chat_turn(provider: str, outcome: str, usage: dict) -> None:
