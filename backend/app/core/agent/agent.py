@@ -508,6 +508,10 @@ class Agent:
                 type(exc).__name__,
             )
         else:
+            if response.tool_calls and tool_iterations > self._max_tool_calls:
+                # The limit notice was already delivered and ignored. End the
+                # turn here rather than loop to the graph's recursion limit.
+                raise RuntimeError("Model kept requesting retrieval after the limit notice.")
             return cast(
                 State,
                 {
