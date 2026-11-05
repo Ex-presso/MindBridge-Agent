@@ -90,8 +90,7 @@ general answer quality or clinical effectiveness. Datasets, scoring methods,
 reproduction commands, and limitations are in [Evaluation](docs/EVALUATION.md).
 
 CI runs backend tests, frontend lint/build, and a Playwright smoke test with
-a local model stub. Live model evaluations run separately. Real PostgreSQL
-concurrency tests are [opt-in](docs/EVALUATION.md#postgresql-integration-checks).
+a local model stub. Live model evaluations run separately.
 
 ## Documentation
 

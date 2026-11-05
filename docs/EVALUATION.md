@@ -13,7 +13,8 @@ establish general response quality or clinical effectiveness.
 | Cross-session memory | 12 on/off cases, 4 semantic cases, 8 behavior checks | 24/24 passed |
 
 The runners reported no execution errors. The archived outputs are linked
-below; the current application may differ from the evaluated configuration.
+below. They predate the current retrieval index, so they describe the
+evaluated configuration, not the current application.
 
 ## Retrieval tool selection
 
@@ -72,8 +73,11 @@ Evidence: [dataset](../evaluation/datasets/memory_benchmark.json),
 - Hosted model behavior can change despite the same model name and temperature.
 - Phrase-based scoring needs human review for nuanced response quality.
 - The memory suite does not evaluate long-term contradiction resolution.
-- Retrieval ranking has not been reevaluated against the current application
-  configuration, so no ranking score is reported here.
+- Retrieval ranking has no reported score. The benchmark for the current
+  index rewrites sampled client questions into search queries and scores the
+  rank of the source example (`build_ir_benchmark.py`, `eval_retrieval.py`);
+  it has not been run yet. Its scores are a lower bound: the dataset holds
+  many near-identical concerns, and only the source example counts as a hit.
 
 ## Running checks
 
@@ -92,24 +96,10 @@ cd evaluation
 uv run --project ../backend python eval_routing.py
 uv run --project ../backend python eval_safety.py
 uv run --project ../backend python eval_memory.py
+uv run --project ../backend python build_ir_benchmark.py   # once, calls the model
+uv run --project ../backend python eval_retrieval.py
 ```
 
 Live runs call the configured model provider and overwrite result CSVs.
 They are separate from CI, which runs backend tests, frontend lint/build,
 and a Playwright smoke test with a local model stub.
-
-### PostgreSQL integration checks
-
-The database integration suite is skipped by default. Use a disposable,
-migrated database: its fixture deletes test accounts ending in `@example.com`.
-
-```bash
-docker run -d --name mindbridge-itest \
-  -e POSTGRES_USER=mindbridge -e POSTGRES_PASSWORD=itest \
-  -e POSTGRES_DB=mindbridge_itest -p 55432:5432 pgvector/pgvector:pg16
-
-cd backend
-export DATABASE_URL="postgresql+psycopg://mindbridge:itest@localhost:55432/mindbridge_itest"
-uv run alembic upgrade head
-RUN_LOCAL_INTEGRATION=1 uv run pytest tests/test_memory_postgres_integration.py
-```

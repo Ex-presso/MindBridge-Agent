@@ -16,6 +16,12 @@ before normal chat. The model chooses whether to call the retrieval tool for
 counselor-style examples. Matched crisis requests take a separate response
 path with support resources and bypass retrieval.
 
+The knowledge base holds MentalChat16K question/answer pairs. Only the client
+question is embedded, because the query the model writes describes a concern
+the way a client would; the counselor's answer is returned whole. Matches
+below a similarity floor are dropped, and a search refuses to run against an
+index that is missing, incomplete, or built with another embedding model.
+
 For longer conversations, compaction first replaces older tool results with
 placeholders, then summarizes older turns if needed. Recent messages remain
 verbatim. Recalled memory is added to the current model prompt rather than
@@ -79,16 +85,3 @@ to finish. This is a throughput and latency trade-off in the current design.
 - Credential barriers protect outbound calls, but an idle decrypted agent
   object on another replica can remain cached until eviction. Immediate
   invalidation across replicas would need a shared channel or credential epoch.
-
-## Verification
-
-[Worker tests](../backend/tests/test_memory_worker.py) cover retry and write
-behavior. [Selection tests](../backend/tests/test_memory_selection.py) and
-[extraction tests](../backend/tests/test_episode_extraction.py) cover memory
-eligibility and evidence validation.
-
-The opt-in [PostgreSQL integration suite](../backend/tests/test_memory_postgres_integration.py)
-covers transaction isolation, ownership constraints, credential and account
-barriers, disjoint job claims, and stale lease completion. Commands are in
-[Evaluation](EVALUATION.md#postgresql-integration-checks), alongside the
-separate live model benchmarks.
