@@ -11,6 +11,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api import router
+from app.core.observability.context import RequestIdLogFilter, RequestIdMiddleware
 from app.core.rate_limit import limiter
 from config.settings import settings
 
@@ -45,6 +46,9 @@ def configure_logging() -> None:
 
     root_logger.setLevel(level)
     for handler in handlers:
+        # On the handler, not the logger, so records from library loggers get
+        # the request id too.
+        handler.addFilter(RequestIdLogFilter())
         root_logger.addHandler(handler)
 
 
@@ -167,9 +171,11 @@ app.add_middleware(
     allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=settings.CORS_ALLOW_METHODS,
     allow_headers=settings.CORS_ALLOW_HEADERS,
-    expose_headers=["X-Conversation-Id"],
+    expose_headers=["X-Conversation-Id", "X-Request-ID"],
     max_age=86400,
 )
+# Added last so it wraps everything above, including CORS preflight handling.
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(router, prefix="/api")
 

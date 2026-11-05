@@ -89,7 +89,8 @@ class Settings(BaseSettings):
     LOG_FILE: str = "app.log"
     LOG_MAX_BYTES: int = 1000000
     LOG_BACKUP_COUNT: int = 5
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    # request_id is added to every record by RequestIdLogFilter.
+    LOG_FORMAT: str = "%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s"
 
     # Auth
     SECRET_KEY: str = "change-me-in-production-use-32-random-bytes"
