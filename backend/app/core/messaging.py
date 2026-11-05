@@ -108,14 +108,22 @@ class JobQueue:
             mandatory=True,
         )
 
-    async def retry_later(self, message: AbstractIncomingMessage) -> None:
-        """Send the job to the retry queue for its next attempt, then ack it.
+    async def retry_later(
+        self,
+        message: AbstractIncomingMessage,
+        *,
+        count_attempt: bool = True,
+    ) -> None:
+        """Send the job to a retry queue, then ack this delivery.
 
         Publishing first means a crash in between leaves a duplicate, never a
-        lost job.
+        lost job. `count_attempt=False` postpones the job without using up one
+        of its attempts.
         """
         attempt = attempt_of(message)
         delay = RETRY_DELAYS_SECONDS[min(attempt, len(RETRY_DELAYS_SECONDS)) - 1]
+        if not count_attempt:
+            attempt -= 1
         await self._exchange.publish(
             aio_pika.Message(
                 body=message.body,

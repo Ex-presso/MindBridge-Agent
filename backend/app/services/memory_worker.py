@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, fields
 from typing import Any
 
 from aio_pika.abc import AbstractIncomingMessage
+from redis.exceptions import RedisError
 
 from app.core.auth.encryption import decrypt_value
 from app.core.llm.provider import get_llm
@@ -29,6 +30,7 @@ from app.core.messaging import JobQueue, attempt_of
 from app.core.observability.context import bind_request_id, reset_request_id
 from app.core.observability.metrics import MEMORY_JOB_SECONDS, MEMORY_JOBS
 from app.core.observability.tracing import tracer
+from app.core.redis_client import get_redis
 from app.db.repositories import (
     api_key_repo,
     conversation_repo,
@@ -44,6 +46,11 @@ _MODEL_TIMEOUT_SECONDS = 60.0
 
 
 _RECONNECT_SECONDS = 5.0
+_JOB_KEY = "mindbridge:memory-job:{}"
+# A claim outlives the slowest job, so a crashed worker's claim expires soon
+# after; a finished job is remembered long enough to absorb late duplicates.
+_CLAIM_SECONDS = 180
+_DONE_SECONDS = 7 * 24 * 3600
 
 
 @dataclass(frozen=True)
@@ -165,6 +172,45 @@ async def handle_task(session_factory: Any, memory: MemoryClient, task: MemoryTa
     return await _extract(session_factory, memory, task)
 
 
+async def _claim(job_id: str) -> str:
+    """Decide what to do with a delivery of this job.
+
+    RabbitMQ can deliver a job more than once. A Redis key per job id answers
+    in one round trip whether this delivery should "run", is a repeat of a job
+    that is already "done", or arrived while another delivery is "busy" with
+    it. SET NX makes the check and the claim a single atomic step.
+
+    Redis is an optimization here, not the guarantee: if it is unset or down
+    the job runs, and the source-message check in _extract still prevents a
+    second write.
+    """
+    redis = get_redis()
+    if redis is None:
+        return "run"
+    key = _JOB_KEY.format(job_id)
+    try:
+        if await redis.set(key, "busy", nx=True, ex=_CLAIM_SECONDS):
+            return "run"
+        return "done" if await redis.get(key) == "done" else "busy"
+    except RedisError:
+        return "run"
+
+
+async def _release(job_id: str, *, done: bool) -> None:
+    """Remember a finished job, or free a failed one for its next attempt."""
+    redis = get_redis()
+    if redis is None:
+        return
+    key = _JOB_KEY.format(job_id)
+    try:
+        if done:
+            await redis.set(key, "done", ex=_DONE_SECONDS)
+        else:
+            await redis.delete(key)
+    except RedisError:
+        pass
+
+
 async def _consume(session_factory: Any, queue: JobQueue, message: AbstractIncomingMessage) -> None:
     """Process one delivery, then acknowledge, retry or bury it."""
     try:
@@ -173,6 +219,16 @@ async def _consume(session_factory: Any, queue: JobQueue, message: AbstractIncom
         # Retrying cannot fix a payload that does not parse.
         MEMORY_JOBS.labels("unknown", "invalid").inc()
         await queue.bury(message)
+        return
+
+    claim = await _claim(message.message_id)
+    if claim == "done":
+        MEMORY_JOBS.labels(task.operation, "duplicate").inc()
+        await message.ack()
+        return
+    if claim == "busy":
+        # Another delivery of this job is still running. Look again later.
+        await queue.retry_later(message, count_attempt=False)
         return
 
     # Jobs have no HTTP request; the job id plays the same role in the logs.
@@ -190,10 +246,12 @@ async def _consume(session_factory: Any, queue: JobQueue, message: AbstractIncom
             memory = await get_memory_client()
             outcome = await handle_task(session_factory, memory, task)
             span.set_attribute("memory.outcome", outcome)
+        await _release(message.message_id, done=True)
         await message.ack()
         logger.info("Memory job finished; operation=%s outcome=%s", task.operation, outcome)
     except asyncio.CancelledError:
         # Shutdown: the unacknowledged message is redelivered later.
+        await _release(message.message_id, done=False)
         raise
     except Exception as exc:
         # The error class only: a provider error can echo the user's message.
@@ -203,6 +261,7 @@ async def _consume(session_factory: Any, queue: JobQueue, message: AbstractIncom
             attempt_of(message),
             type(exc).__name__,
         )
+        await _release(message.message_id, done=False)
         # A deletion is a privacy promise, so it is retried without limit.
         exhausted = (
             task.operation == "extract"
