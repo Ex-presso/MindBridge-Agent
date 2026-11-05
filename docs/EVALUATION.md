@@ -10,7 +10,6 @@ establish general response quality or clinical effectiveness.
 |---|---|---|
 | Retrieval tool selection | 45 scored cases; 5 ambiguous cases excluded | 45/45 matched expected decisions; precision, recall, and F1 = 1.000 |
 | Safety response markers | 20 required/forbidden-phrase probes | 20/20 passed |
-| Cross-session memory | 12 on/off cases, 4 semantic cases, 8 behavior checks | 24/24 passed |
 
 The runners reported no execution errors. The archived outputs are linked
 below. They predate the current retrieval index, so they describe the
@@ -49,30 +48,15 @@ Evidence: [dataset](../evaluation/datasets/safety_probes.json),
 [results](../evaluation/results/safety_eval_results.csv),
 [summary](../evaluation/results/safety_eval_summary.csv).
 
-## Cross-session memory
-
-The runner uses disposable accounts and the public API, including chat
-persistence, the outbox worker, Store writes, and a new conversation. Recall
-was 6/6 with memory enabled and 0/6 with memory disabled, giving 12/12 expected
-on/off outcomes. Four explicit fact types passed storage and recall checks.
-The eight remaining cases cover consent, clearing, user isolation, crisis
-exclusion, relevance, rejected facts, duplicate delivery, and account deletion.
-
-DeepSeek handled chat and episode extraction. LM Studio served
-`text-embedding-nomic-embed-text-v1.5` at 768 dimensions for episode recall.
-Scoring uses expected phrase groups, stored evidence, and API state checks.
-
-Evidence: [dataset](../evaluation/datasets/memory_benchmark.json),
-[configuration](../evaluation/configs/memory_eval.yaml),
-[results](../evaluation/results/memory_eval_results.csv),
-[summary](../evaluation/results/memory_eval_summary.csv).
-
 ## Limitations
 
 - The routing and safety sets are small and were labeled by one author.
 - Hosted model behavior can change despite the same model name and temperature.
 - Phrase-based scoring needs human review for nuanced response quality.
-- The memory suite does not evaluate long-term contradiction resolution.
+- Memory has no reported result. The earlier memory benchmark tested an
+  implementation that mem0 has replaced, and its runner was removed with it.
+  The scenarios remain in `evaluation/datasets/memory_benchmark.json` for a
+  new runner.
 - Retrieval ranking has no reported score. The benchmark for the current
   index rewrites sampled client questions into search queries and scores the
   rank of the source example (`build_ir_benchmark.py`, `eval_retrieval.py`);
@@ -83,19 +67,13 @@ Evidence: [dataset](../evaluation/datasets/memory_benchmark.json),
 
 ### Live model benchmarks
 
-Add a local `DEEPSEEK_API_KEY` to `backend/.env` and start PostgreSQL. Routing
-and safety require the populated collection and matching embeddings specified
-in their configuration files. For memory, start the application with
-`MEMORY_ENABLED=true` and an embedding model whose dimensions match
-`MEMORY_EMBED_DIMS`. To reproduce the archived memory setup, use the 768-dimensional
-Nomic model through LM Studio. The runner configuration describes this setup
-but does not configure the backend's embedding service.
+Add a local `DEEPSEEK_API_KEY` to `backend/.env`, start PostgreSQL, and build
+the knowledge base with the embedding model named in the configuration files.
 
 ```bash
 cd evaluation
 uv run --project ../backend python eval_routing.py
 uv run --project ../backend python eval_safety.py
-uv run --project ../backend python eval_memory.py
 uv run --project ../backend python build_ir_benchmark.py   # once, calls the model
 uv run --project ../backend python eval_retrieval.py
 ```

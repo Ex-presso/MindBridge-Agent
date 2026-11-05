@@ -2,6 +2,8 @@
 
 MindBridge uses a Next.js client, a FastAPI API, and a LangGraph agent.
 PostgreSQL stores application data, graph checkpoints, and user-scoped memory.
+RabbitMQ carries background memory jobs, and Redis holds rate limit counters
+and job idempotency keys.
 The overview diagram is in the [README](../README.md#architecture).
 
 ## Agent workflow
@@ -33,53 +35,80 @@ details, and that reply becomes part of the saved conversation.
 | Storage | Purpose |
 |---|---|
 | LangGraph checkpoints | Resume the graph state of one conversation |
-| Semantic facts | Carry explicit preferences, goals, helpful strategies, and important people across conversations |
-| Episodes | Recall relevant past conversations through similarity search over validated summaries |
+| mem0 memories in pgvector | Carry facts the user stated into later conversations |
 
-Memory is off by default, both globally and per user. Inspection and deletion
-remain available when memory is disabled. Clearing memory disables consent
-and advances a data epoch. Queued jobs and stored items from the old epoch
-are rejected for subsequent writes and recall. An already running chat
-may finish using memory selected before the consent change.
+Memory is off by default, both globally and per user.
+[mem0](https://github.com/mem0ai/mem0) extracts facts from each user message
+with the user's own model, embeds them, and stores them in pgvector. Recall
+combines vector similarity with keyword match and keeps results above a
+similarity floor. The application adds four things around it:
 
-Episode extraction accepts claims attributed to user messages. Each claim
-must be an exact span of its evidence quote, and the worker checks that quote
-against the relational source message before storage. Semantic facts use a
-small set of explicit English patterns. This limits what the application
-stores without relying on an unconstrained model-generated user profile.
+- **Consent and epochs.** Every memory is stamped with a data epoch.
+  Clearing memory disables consent and advances the epoch, so older memories
+  can no longer be recalled even before they are deleted, and a job that was
+  already running cannot bring them back.
+- **Deletion.** Inspection and deletion work while memory is disabled.
+  Deleting a conversation, an account, or a single memory removes the
+  matching rows. A conversation that reaches a crisis turn is excluded from
+  recall at once and its memories are deleted.
+- **A veto.** mem0 writes memories with a model, so a deterministic filter
+  drops any that state a diagnosis or contain an instruction, when they are
+  written and again when they are recalled.
+- **Nothing outside PostgreSQL.** mem0's SQLite side store, which holds
+  recent raw messages and the text of deleted memories, is replaced with one
+  that records nothing, and its telemetry is off.
 
-## Background memory writes
+Only user messages are sent for extraction. Recalled memories are added to
+the current prompt rather than copied into checkpointed graph state. A model
+reply may repeat a recalled detail, and that reply becomes part of the saved
+conversation.
 
-![Memory write path: atomic reply and job persistence, leased processing, consent checks, and validated Store writes](img/memory-write.svg)
+## Background memory jobs
 
-[Interactive diagram](img/skill/memory-write.html).
+```mermaid
+sequenceDiagram
+    participant API as Chat request
+    participant PG as PostgreSQL
+    participant Relay as Outbox relay
+    participant MQ as RabbitMQ
+    participant W as Worker
+    API->>PG: reply + outbox row, one transaction
+    Relay->>PG: lock waiting rows
+    Relay->>MQ: publish, wait for confirm
+    Relay->>PG: delete published rows
+    MQ->>W: deliver job
+    W->>PG: check consent snapshot
+    W->>W: mem0 extraction, no lock held
+    W->>PG: check consent snapshot again
+    W->>MQ: ack, or republish to a retry queue
+```
 
-For an eligible turn, the assistant reply and extraction job commit in the
-same database transaction. The job stores message IDs and version snapshots.
-The worker reloads the source messages when processing it. This keeps the
-extraction call off the conversation request path and preserves pending work
-if the backend restarts.
+The reply and the job commit in one transaction as an outbox row. The
+database and the broker share no transaction, so publishing from the request
+could lose a job or announce a turn that was rolled back. A relay publishes
+waiting rows to RabbitMQ and deletes each one after the broker confirms it.
 
-The worker claims a job with `FOR UPDATE SKIP LOCKED` and commits the claim.
-A lease allows another worker to reclaim abandoned work. Processing then
-takes locks in `User → Conversation → Job` order and checks consent, data
-epoch, conversation revision, and lease ownership before calling the model.
-Writes use the conversation ID and revision to handle repeated delivery.
-Completion and retry updates must match the current lease token.
+Delivery is therefore at least once, and the worker tolerates duplicates in
+two ways. A Redis key per job id absorbs repeats in one round trip, and
+before extracting the worker looks for memories already stored for the job's
+source message, which still holds if Redis is unavailable.
 
-The worker runs inside the backend process and polls PostgreSQL. Keeping the
-queue in the application database allows the reply and job to share a
-transaction. Processing holds locks across the extraction call, so consent
-changes, deletion, and other operations on the affected rows can wait for it
-to finish. This is a throughput and latency trade-off in the current design.
+A failed job is republished to a retry queue whose messages expire back into
+the work queue after 5 or 30 seconds. An extraction that fails three times
+moves to a dead-letter queue; a deletion is retried without limit. While
+RabbitMQ is down, chat keeps working and rows wait in the outbox.
+
+No database lock is held during extraction. The worker checks the job's
+consent version and data epoch before the model call and again after it, and
+deletes what it wrote if they changed in between.
 
 ## Observability
 
 | Signal | Where | Use |
 |---|---|---|
 | Request id | `X-Request-ID` response header and every log line | Join the log lines of one request |
-| Metrics | `GET /metrics`, Prometheus format | Latency by route, time to first token, token usage, model call latency, retrieval outcomes |
-| Traces | OTLP/HTTP export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set | One trace per request, with a span for each model call and retrieval |
+| Metrics | `GET /metrics`, Prometheus format | Latency by route, time to first token, token usage, model call latency, retrieval outcomes, memory job outcomes and lag |
+| Traces | OTLP/HTTP export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set | One trace per request, with a span for each model call, each retrieval, and the memory job the request queued |
 
 Logs, metric labels, and span attributes carry identifiers, counts, and
 scores, never message text. Metric labels take values from fixed sets such
@@ -88,11 +117,13 @@ as route templates and provider names; model names appear only on spans.
 
 ## Current limitations
 
-- Crisis detection and memory content filters use English patterns. They can
-  miss indirect phrasing and do not establish clinical safety.
-- Contradiction resolution and stale-fact consolidation are not implemented.
-- If embedding initialization fails, inspection and deletion remain available
-  through the key-value Store, but episode similarity recall is disabled.
+- Crisis detection and the memory veto use English patterns. They can miss
+  indirect phrasing and do not establish clinical safety.
+- mem0 only adds memories. Contradiction resolution and consolidation of
+  stale facts are not implemented.
+- Memory depends on the embedding model. If it cannot load, chat continues
+  without recall and the memory endpoints return 503.
+- The dead-letter queue has no automatic replay; a person has to inspect it.
 - Graph checkpoints and relational messages commit through separate clients.
   A failure between those commits can leave graph history ahead of the UI.
 - Credential barriers protect outbound calls, but an idle decrypted agent

@@ -14,7 +14,7 @@ Screenshots show fictional, seeded demo data; chat replies come from a local mod
 
 | Memory controls | Model settings |
 |---|---|
-| ![Saved facts and conversation episodes](docs/img/screenshot-memory.png) | ![Configuration for compatible model providers](docs/img/screenshot-settings.png) |
+| ![Saved memories and the consent switch](docs/img/screenshot-memory.png) | ![Configuration for compatible model providers](docs/img/screenshot-settings.png) |
 
 ## Features
 
@@ -22,11 +22,12 @@ Screenshots show fictional, seeded demo data; chat replies come from a local mod
   longer chats, and streamed replies.
 - **Conditional retrieval:** the agent can retrieve counselor-style examples
   for support requests instead of adding retrieval to every turn.
-- **User-controlled memory:** explicit facts and relevant past episodes can
-  carry across conversations. Memory is off by default; saved items remain
-  inspectable and deletable when it is disabled.
-- **Background extraction:** durable jobs, retries, and consent checks keep
-  memory-extraction calls off the conversation request path.
+- **User-controlled memory:** mem0 extracts facts from what the user says and
+  recalls them in later conversations. Memory is off by default; saved items
+  stay inspectable and deletable, one by one or all at once.
+- **Background extraction:** a transactional outbox, RabbitMQ with delayed
+  retries and a dead-letter queue, and consent checks keep extraction calls
+  off the conversation request path.
 - **Compatible providers:** users bring their own API keys for OpenAI- or
   Anthropic-compatible endpoints. Keys are encrypted at rest.
 - **Observability:** request ids in logs, Prometheus metrics, and optional
@@ -40,9 +41,13 @@ flowchart LR
     API --> GRAPH["LangGraph agent"]
     GRAPH -->|"conditional tool call"| RAG["pgvector RAG"]
     GRAPH --> CHECKPOINTS["PostgreSQL checkpoints"]
-    API -->|"transactional outbox"| WORKER["Memory worker"]
-    WORKER --> STORE["LangGraph Store"]
-    STORE -->|"semantic + episodic recall"| GRAPH
+    API -->|"outbox row"| RELAY["Outbox relay"]
+    RELAY --> MQ["RabbitMQ"]
+    MQ --> WORKER["Memory worker"]
+    WORKER --> MEM["mem0 on pgvector"]
+    MEM -->|"recall"| GRAPH
+    WORKER -.->|"idempotency keys"| REDIS["Redis"]
+    API -.->|"rate limits"| REDIS
 ```
 
 The model chooses whether to retrieve examples. Application code controls
@@ -85,10 +90,11 @@ Archived results from 2026-08-15, using `deepseek-v4-flash`:
 |---|---|---|
 | Retrieval tool selection | 45 scored cases; 5 ambiguous cases recorded separately | 45/45 matched expected decisions |
 | Safety response markers | 20 probes with required and forbidden phrases | 20/20 passed |
-| Cross-session memory | 12 on/off cases, 4 semantic cases, 8 behavior checks | 24/24 passed |
 
 These are small, application-specific regression checks. They do not establish
-general answer quality or clinical effectiveness. Datasets, scoring methods,
+general answer quality or clinical effectiveness, and they predate the current
+retrieval index and the mem0 memory, which have no reported results yet.
+Datasets, scoring methods,
 reproduction commands, and limitations are in [Evaluation](docs/EVALUATION.md).
 
 CI runs backend tests, frontend lint/build, and a Playwright smoke test with
