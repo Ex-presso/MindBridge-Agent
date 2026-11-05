@@ -49,6 +49,22 @@ CRISIS_TURNS = Counter(
     "User turns routed to the crisis path.",
     ["category"],
 )
+RAG_SEARCH_SECONDS = Histogram(
+    "rag_search_duration_seconds",
+    "Knowledge base search latency: query embedding plus the vector scan.",
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 4),
+)
+RAG_SEARCHES = Counter(
+    "rag_searches_total",
+    "Knowledge base searches by outcome: served, empty or unavailable.",
+    ["outcome"],
+)
+# Shows where live traffic sits relative to RAG_MIN_SIMILARITY.
+RAG_TOP_SIMILARITY = Histogram(
+    "rag_top_similarity",
+    "Similarity of the best match, before the floor is applied.",
+    buckets=(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+)
 
 
 def record_chat_turn(provider: str, outcome: str, usage: dict) -> None:
