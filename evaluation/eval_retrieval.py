@@ -114,7 +114,6 @@ def ensure_index(chunk_size: int, chunk_overlap: int, collection: str,
 
     print(f"  Building: cs={chunk_size}, co={chunk_overlap} -> {collection}")
     store = VectorStore(
-        backend="pgvector",
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         collection_name=collection,
@@ -127,7 +126,6 @@ def get_retriever(chunk_size: int, chunk_overlap: int, collection: str, k: int):
     from app.core.rag.vector_store import VectorStore
 
     store = VectorStore(
-        backend="pgvector",
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         collection_name=collection,

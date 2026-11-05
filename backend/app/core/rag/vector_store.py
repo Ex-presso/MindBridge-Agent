@@ -1,4 +1,4 @@
-"""Vector store abstraction supporting FAISS (legacy) and pgvector backends."""
+"""pgvector-backed vector store for the counseling knowledge base."""
 
 from __future__ import annotations
 
@@ -98,18 +98,16 @@ def get_embeddings() -> Embeddings:
 
 
 class VectorStore:
-    """Unified vector store that can use either FAISS or pgvector as backend."""
+    """Builds and loads the pgvector collection."""
 
     def __init__(
         self,
-        backend: str = "pgvector",
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
         collection_name: str | None = None,
         max_samples: int | None = None,
         async_mode: bool = False,
     ):
-        self.backend = backend
         self.chunk_size = chunk_size or settings.RAG_CHUNK_SIZE
         self.chunk_overlap = chunk_overlap or settings.RAG_CHUNK_OVERLAP
         self.collection_name = collection_name or settings.PGVECTOR_COLLECTION
@@ -162,8 +160,6 @@ class VectorStore:
                     )
                 )
         return docs
-
-    # ── pgvector backend ──────────────────────────────────────────────
 
     def _get_pgvector_store(self):
         from langchain_postgres import PGVector
@@ -219,45 +215,11 @@ class VectorStore:
         self.vectorstore = self._get_pgvector_store()
         return self.vectorstore
 
-    # ── FAISS backend (legacy) ────────────────────────────────────────
-
-    def build_faiss(self) -> Any:
-        from langchain_community.vectorstores.faiss import FAISS
-
-        self.load_documents()
-        docs = self._example_to_documents()
-
-        self.vectorstore = FAISS.from_documents(docs, self.embedding)
-        index_dir = settings.INDEX_DIR
-        index_dir.parent.mkdir(parents=True, exist_ok=True)
-        self.vectorstore.save_local(str(index_dir))
-        return self.vectorstore
-
-    def load_faiss(self) -> Any:
-        from langchain_community.vectorstores.faiss import FAISS
-
-        index_dir = settings.INDEX_DIR
-        if not index_dir.exists():
-            raise FileNotFoundError(f"Index not found at {index_dir}")
-
-        self.vectorstore = FAISS.load_local(
-            str(index_dir),
-            self.embedding,
-            allow_dangerous_deserialization=True,
-        )
-        return self.vectorstore
-
-    # ── Unified interface ─────────────────────────────────────────────
-
     def build(self) -> Any:
-        if self.backend == "pgvector":
-            return self.build_pgvector()
-        return self.build_faiss()
+        return self.build_pgvector()
 
     def load(self) -> Any:
-        if self.backend == "pgvector":
-            return self.load_pgvector()
-        return self.load_faiss()
+        return self.load_pgvector()
 
     def get_retriever(self, k: int | None = None) -> VectorStoreRetriever:
         assert self.vectorstore is not None, "Vectorstore not built/loaded"
@@ -266,7 +228,7 @@ class VectorStore:
 
 
 if __name__ == "__main__":
-    store = VectorStore(backend="pgvector")
+    store = VectorStore()
     print(f"Embedding provider: {settings.EMBEDDING_PROVIDER}")
     print(f"Embedding model: {settings.EMBEDDING_MODEL}")
     print("Building pgvector index...")

@@ -80,7 +80,7 @@ def build_if_needed(skip_build: bool) -> None:
     from app.core.rag.vector_store import VectorStore
 
     print(f"building {COLL} (cs={CS}, co={CO}, max_samples=3000)...")
-    VectorStore(backend="pgvector", chunk_size=CS, chunk_overlap=CO,
+    VectorStore(chunk_size=CS, chunk_overlap=CO,
                 collection_name=COLL, max_samples=3000).build()
 
 
@@ -89,7 +89,7 @@ def dense_retriever(instruction: str):
     sm.settings.EMBEDDING_QUERY_INSTRUCTION = instruction
     from app.core.rag.vector_store import VectorStore
 
-    store = VectorStore(backend="pgvector", chunk_size=CS, chunk_overlap=CO, collection_name=COLL)
+    store = VectorStore(chunk_size=CS, chunk_overlap=CO, collection_name=COLL)
     store.load()
     return store.get_retriever(k=20)
 

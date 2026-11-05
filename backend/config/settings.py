@@ -71,8 +71,6 @@ class Settings(BaseSettings):
     PGVECTOR_COLLECTION: str = "mental_health_docs"
 
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]  # => backend/
-    DATA_DIR: Path = PROJECT_ROOT / "data"
-    INDEX_DIR: Path = DATA_DIR / "MentalChat16K_faiss_index"
 
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
