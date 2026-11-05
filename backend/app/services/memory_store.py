@@ -10,7 +10,7 @@ from typing import Any
 
 from langgraph.store.postgres.aio import AsyncPostgresStore
 
-from app.core.rag.vector_store import get_embeddings
+from app.core.embeddings import get_embeddings
 from config.settings import settings
 
 

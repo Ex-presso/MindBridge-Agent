@@ -2,91 +2,14 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
-from threading import RLock
 from typing import TYPE_CHECKING, Any
 
+from app.core.embeddings import get_embeddings
 from config.settings import settings
 
 if TYPE_CHECKING:
     from langchain_core.documents import Document
-    from langchain_core.embeddings import Embeddings
     from langchain_core.vectorstores.base import VectorStoreRetriever
-
-
-@lru_cache(maxsize=4)
-def _load_sentence_transformer(model_name: str) -> Any:
-    """Load each local embedding model once per process."""
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer(model_name)
-
-
-@lru_cache(maxsize=4)
-def _sentence_transformer_lock(model_name: str) -> RLock:
-    """Serialize encode calls when RAG and memory share one model instance."""
-    return RLock()
-
-
-def get_embeddings() -> Embeddings:
-    """Create embedding model based on settings.
-
-    Supports:
-      - "sentence_transformers": Local model via sentence-transformers (recommended)
-      - "local": OpenAI-compatible API (LM Studio, Ollama, etc.)
-    """
-    provider = settings.EMBEDDING_PROVIDER.lower()
-
-    if provider == "sentence_transformers":
-        from langchain_core.embeddings import Embeddings as BaseEmbeddings
-
-        class SentenceTransformerEmbeddings(BaseEmbeddings):
-            """Qwen3-Embedding wrapper with asymmetric query instruction.
-
-            Qwen3-Embedding is trained for retrieval with an "Instruct: …\\nQuery: …"
-            prefix on the *query* side only; documents are embedded plain. Applying
-            it lifts retrieval quality with no reindex (documents are unchanged).
-            Set EMBEDDING_QUERY_INSTRUCTION="" to disable (e.g. for a non-instruct
-            embedding model).
-            """
-
-            def __init__(self, model, model_name: str, query_instruction: str):
-                self._model = model
-                self._lock = _sentence_transformer_lock(model_name)
-                self._query_instruction = query_instruction
-
-            def embed_documents(self, texts: list[str]) -> list[list[float]]:
-                with self._lock:
-                    return self._model.encode(
-                        texts,
-                        show_progress_bar=len(texts) > 50,
-                    ).tolist()
-
-            def embed_query(self, text: str) -> list[float]:
-                if self._query_instruction:
-                    text = f"Instruct: {self._query_instruction}\nQuery: {text}"
-                with self._lock:
-                    return self._model.encode(text).tolist()
-
-        return SentenceTransformerEmbeddings(
-            _load_sentence_transformer(settings.EMBEDDING_MODEL),
-            settings.EMBEDDING_MODEL,
-            settings.EMBEDDING_QUERY_INSTRUCTION,
-        )
-
-    elif provider == "local":
-        from langchain_openai import OpenAIEmbeddings
-        from pydantic import SecretStr
-
-        return OpenAIEmbeddings(
-            model=settings.EMBEDDING_MODEL,
-            base_url=settings.EMBEDDING_BASE_URL,
-            api_key=SecretStr("lm-studio"),  # LM Studio doesn't need a real key
-            # Send plain strings: LM Studio rejects tiktoken token-ID batches.
-            check_embedding_ctx_length=False,
-        )
-    else:
-        raise ValueError(f"Unknown embedding provider: {provider}")
 
 
 class VectorStore:
