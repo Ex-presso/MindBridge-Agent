@@ -65,7 +65,7 @@ class ExampleRetriever:
 
     @classmethod
     def open(cls) -> "ExampleRetriever":
-        """Blocking: checks the index, then loads the embedding model."""
+        """Blocking: checks the index. The embedding model loads on first search."""
         _verify_index()
         return cls(open_store(async_mode=True))
 

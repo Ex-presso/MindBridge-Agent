@@ -173,7 +173,7 @@ class MemoryClient:
 
     @classmethod
     def open(cls) -> "MemoryClient":
-        """Blocking: loads the embedding model and creates the table if needed."""
+        """Blocking: creates the table if needed. The embedding model loads on first use."""
         memory = AsyncMemory(
             MemoryConfig(
                 vector_store=VectorStoreConfig(

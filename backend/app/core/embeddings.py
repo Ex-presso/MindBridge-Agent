@@ -33,10 +33,16 @@ class SentenceTransformerEmbeddings(Embeddings):
     embedded plain. EMBEDDING_QUERY_INSTRUCTION="" disables the prefix.
     """
 
-    def __init__(self, model: Any, model_name: str, query_instruction: str):
-        self._model = model
+    def __init__(self, model_name: str, query_instruction: str):
+        self._model_name = model_name
         self._lock = _sentence_transformer_lock(model_name)
         self._query_instruction = query_instruction
+
+    @property
+    def _model(self) -> Any:
+        # Loaded on first use, so code that only lists or deletes stored
+        # vectors never pays for the model.
+        return _load_sentence_transformer(self._model_name)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         with self._lock:
@@ -62,7 +68,6 @@ def get_embeddings() -> Embeddings:
 
     if provider == "sentence_transformers":
         return SentenceTransformerEmbeddings(
-            _load_sentence_transformer(settings.EMBEDDING_MODEL),
             settings.EMBEDDING_MODEL,
             settings.EMBEDDING_QUERY_INSTRUCTION,
         )
