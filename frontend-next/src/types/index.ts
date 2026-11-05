@@ -50,12 +50,10 @@ export interface ProviderModels {
 }
 
 export interface MemoryItem {
-  namespace: string[];
-  key: string;
-  value: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-  score?: number | null;
+  id: string;
+  text: string;
+  conversation_id: string | null;
+  created_at: string | null;
 }
 
 export interface MemoryStatus {

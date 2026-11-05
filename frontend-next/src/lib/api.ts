@@ -189,10 +189,17 @@ export const api = {
       ),
   },
   memory: {
-    get: (expectedUserId: string, limit = 50, offset = 0, category?: "semantic" | "episodes") =>
+    get: (expectedUserId: string, limit = 50, offset = 0) =>
       request<MemoryList>(
-        `/api/v1/memory?limit=${limit}&offset=${offset}${category ? `&category=${category}` : ""}`,
+        `/api/v1/memory?limit=${limit}&offset=${offset}`,
         {},
+        true,
+        expectedUserId,
+      ),
+    remove: (expectedUserId: string, id: string) =>
+      request<void>(
+        `/api/v1/memory/${id}`,
+        { method: "DELETE" },
         true,
         expectedUserId,
       ),
