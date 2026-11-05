@@ -22,13 +22,14 @@ from app.db.models.user import User
 from app.db.repositories import (
     api_key_repo,
     conversation_repo,
-    memory_job_repo,
     message_repo,
+    outbox_repo,
     user_repo,
 )
 from app.schemas.conversation import SessionChatRequest
 from app.services import chat as chat_service
-from app.services import conversation_service
+from app.services import conversation_service, outbox_relay
+from app.services.memory_worker import MemoryTask
 from config.settings import settings
 
 if TYPE_CHECKING:
@@ -72,19 +73,17 @@ def _conversation_guard(db, user_id: uuid.UUID):
     return guard
 
 
-async def _enqueue_episode_after_success(
+async def _enqueue_extraction(
     db,
     *,
     user_id: uuid.UUID,
     conversation,
-    target_revision: int,
     user_message,
-    assistant_message,
     api_key,
     provider: str,
     model: str,
 ) -> None:
-    """Capture a successful turn in the same transaction as its revision."""
+    """Request memory extraction in the transaction that saves the turn."""
     if not settings.MEMORY_ENABLED:
         return
     access = await user_repo.get_memory_access_snapshot(db, user_id)
@@ -98,20 +97,18 @@ async def _enqueue_episode_after_success(
         != CRISIS_DETECTOR_VERSION
     ):
         return
-    await memory_job_repo.enqueue_extract_episode(
-        db,
-        user_id=user_id,
-        conversation_id=conversation.id,
-        target_revision=target_revision,
+    task = MemoryTask(
+        operation="extract",
+        user_id=str(user_id),
+        conversation_id=str(conversation.id),
         consent_version=access.consent_version,
         data_epoch=access.data_epoch,
-        source_user_message_id=user_message.id,
-        source_assistant_message_id=assistant_message.id,
-        api_key_id=api_key.id,
+        message_id=str(user_message.id),
+        api_key_id=str(api_key.id),
         provider=provider,
         model=model,
-        base_url=api_key.base_url,
     )
+    await outbox_repo.add(db, task.event_type, task.to_payload())
 
 
 def _get_agent(
@@ -372,16 +369,16 @@ async def session_chat(
             user.id,
         )
     if transitioned:
-        await memory_job_repo.enqueue_delete_episode(
-            db,
-            user_id=user.id,
-            conversation_id=conv.id,
-            target_revision=int(conv.memory_revision),
-            consent_version=initial_access.consent_version,
-            data_epoch=initial_access.data_epoch,
+        # The conversation just turned sensitive: its memories must go.
+        task = MemoryTask(
+            operation="delete_conversation",
+            user_id=str(user.id),
+            conversation_id=str(conv.id),
         )
+        await outbox_repo.add(db, task.event_type, task.to_payload())
     await conversation_repo.touch(db, conv.id, model=body.model, provider=provider)
     await db.commit()
+    outbox_relay.notify()
 
     thread_id = str(conv.id)
     conv_id_str = str(conv.id)
@@ -469,7 +466,7 @@ async def session_chat(
                                             raise RuntimeError(
                                                 "Model returned an empty response."
                                             )
-                                        assistant_message = await message_repo.create(
+                                        await message_repo.create(
                                             session,
                                             conversation_id=conv.id,
                                             role="assistant",
@@ -482,17 +479,11 @@ async def session_chat(
                                             session,
                                             conv.id,
                                         )
-                                        target_revision = await conversation_repo.increment_memory_revision(
-                                            session,
-                                            conv.id,
-                                        )
-                                        await _enqueue_episode_after_success(
+                                        await _enqueue_extraction(
                                             session,
                                             user_id=user.id,
                                             conversation=locked_conv,
-                                            target_revision=target_revision,
                                             user_message=user_message,
-                                            assistant_message=assistant_message,
                                             api_key=run_key_record,
                                             provider=provider,
                                             model=body.model,
@@ -504,6 +495,9 @@ async def session_chat(
                         "Streaming chat generation or persistence failed for conversation %s",
                         conv_id_str,
                     )
+
+                # The transaction above has committed, outbox row included.
+                outbox_relay.notify()
 
                 if missing:
                     yield f"data: {json.dumps({'error': 'Conversation no longer exists.'})}\n\n".encode()
@@ -610,7 +604,7 @@ async def session_chat(
                 )
                 if not reply.strip():
                     raise RuntimeError("Model returned an empty response.")
-                assistant_message = await message_repo.create(
+                await message_repo.create(
                     session,
                     conversation_id=conv.id,
                     role="assistant",
@@ -620,22 +614,17 @@ async def session_chat(
                     tokens_used=usage.get("total"),
                 )
                 await conversation_repo.touch(session, conv.id)
-                target_revision = await conversation_repo.increment_memory_revision(
-                    session,
-                    conv.id,
-                )
-                await _enqueue_episode_after_success(
+                await _enqueue_extraction(
                     session,
                     user_id=user.id,
                     conversation=locked_conv,
-                    target_revision=target_revision,
                     user_message=user_message,
-                    assistant_message=assistant_message,
                     api_key=run_key_record,
                     provider=provider,
                     model=body.model,
                 )
         outcome = "ok"
+        outbox_relay.notify()
     except HTTPException:
         raise
     except Exception as exc:

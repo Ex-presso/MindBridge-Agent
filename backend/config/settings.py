@@ -50,11 +50,13 @@ class Settings(BaseSettings):
     MEMORY_EMBED_DIMS: int = Field(default=1024, ge=1)
     # pgvector table that mem0 creates and owns.
     MEMORY_COLLECTION: str = "memories"
-    # One lightweight in-process outbox worker. It remains enabled when the
-    # memory kill switch is off so previously queued privacy deletions still run.
+    # Background memory jobs travel through RabbitMQ. With the URL unset the
+    # outbox relay and the job consumer do not start, and queued work waits in
+    # PostgreSQL. The worker stays enabled when the memory kill switch is off
+    # so privacy deletions that were already queued still run.
+    RABBITMQ_URL: str | None = None
     MEMORY_WORKER_ENABLED: bool = True
-    MEMORY_WORKER_POLL_SECONDS: float = Field(default=1.0, ge=0.1, le=60.0)
-    MEMORY_WORKER_LEASE_SECONDS: int = Field(default=90, ge=35, le=600)
+    # Attempts before an extraction job is moved to the dead letter queue.
     MEMORY_WORKER_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=10)
 
     # Embedding settings: "sentence_transformers" or "local" (LM Studio / Ollama)

@@ -126,23 +126,6 @@ async def record_memory_crisis_review(
     return bool(final_value)
 
 
-async def increment_memory_revision(
-    db: AsyncSession,
-    conv_id: uuid.UUID,
-) -> int:
-    """Advance the completed-assistant-turn revision in the current transaction."""
-    result = await db.execute(
-        update(Conversation)
-        .where(Conversation.id == conv_id)
-        .values(memory_revision=Conversation.memory_revision + 1)
-        .returning(Conversation.memory_revision)
-    )
-    revision = result.scalar_one_or_none()
-    if revision is None:
-        raise LookupError("Conversation no longer exists.")
-    return int(revision)
-
-
 async def list_by_user(db: AsyncSession, user_id: uuid.UUID, *, limit: int = 50) -> list[Conversation]:
     result = await db.execute(
         select(Conversation)

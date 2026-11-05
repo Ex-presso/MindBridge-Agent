@@ -118,28 +118,29 @@ async def lifespan(app: FastAPI):
     app.state.checkpointer = checkpointer
     app.state.pg_pool = pool
 
-    # 2b. A single lightweight leased worker drains extraction and privacy
-    # deletion jobs. SKIP LOCKED keeps this safe if the API is later replicated.
-    memory_worker_stop = asyncio.Event()
-    memory_worker_task = None
-    if settings.MEMORY_WORKER_ENABLED:
-        from app.services.memory_worker import run_memory_worker
+    # 2b. Background memory jobs: the outbox relay and the RabbitMQ consumer.
+    memory_pipeline_task = None
+    if settings.MEMORY_WORKER_ENABLED and settings.RABBITMQ_URL:
+        from app.services.memory_worker import run_memory_pipeline
 
-        memory_worker_task = asyncio.create_task(
-            run_memory_worker(AsyncSessionLocal, stop_event=memory_worker_stop),
-            name="memory-worker",
+        memory_pipeline_task = asyncio.create_task(
+            run_memory_pipeline(AsyncSessionLocal),
+            name="memory-pipeline",
         )
-    app.state.memory_worker_task = memory_worker_task
+    elif settings.MEMORY_ENABLED:
+        logger.warning(
+            "MEMORY_ENABLED is on but RABBITMQ_URL is unset: memory jobs will "
+            "wait in the outbox and nothing new will be remembered."
+        )
 
     logger.info("MindBridge backend ready.")
     try:
         yield
     finally:
         logger.info("Shutting down...")
-        if memory_worker_task is not None:
-            memory_worker_stop.set()
-            memory_worker_task.cancel()
-            await asyncio.gather(memory_worker_task, return_exceptions=True)
+        if memory_pipeline_task is not None:
+            memory_pipeline_task.cancel()
+            await asyncio.gather(memory_pipeline_task, return_exceptions=True)
         await pool.close()
 
 

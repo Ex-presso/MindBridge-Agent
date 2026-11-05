@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory import MemoryClient, MemoryRecord, get_memory_client
 from app.db.models.user import User
-from app.db.repositories import memory_job_repo, user_repo
+from app.db.repositories import user_repo
 
 
 class MemoryServiceError(RuntimeError):
@@ -165,14 +165,16 @@ async def invalidate_memory_for_deletion(
     db: AsyncSession,
     user_id: uuid.UUID,
 ) -> MemoryGateState:
-    """Disable, advance the clear epoch, cancel jobs, and commit atomically."""
+    """Disable and advance the clear epoch in one commit.
+
+    Jobs already queued carry the old epoch, so the worker rejects them.
+    """
     state = await _write_memory_consent(
         db,
         user_id,
         enabled=False,
         bump_data_epoch=True,
     )
-    await memory_job_repo.cancel_unfinished_for_user(db, user_id)
     await db.commit()
     return state
 
@@ -191,7 +193,6 @@ async def begin_account_deletion(
         bump_data_epoch=True,
         account_deletion_pending=True,
     )
-    await memory_job_repo.cancel_unfinished_for_user(db, user_id)
     await db.commit()
     return state
 
@@ -227,7 +228,6 @@ async def clear_memory(db: AsyncSession, user_id: uuid.UUID) -> int:
         # concurrent PATCH completed in the small window after the first commit.
         # This UPDATE also holds the user row lock across the deletion.
         await _write_memory_consent(db, user_id, enabled=False)
-        await memory_job_repo.cancel_unfinished_for_user(db, user_id)
         deleted = await delete_user_memories(user_id)
     except MemoryStoreError:
         # Persist the second fail-closed write before releasing the row lock.

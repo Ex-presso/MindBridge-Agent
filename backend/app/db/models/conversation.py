@@ -2,7 +2,6 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -33,12 +32,6 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(String(200), default="New conversation")
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    memory_revision: Mapped[int] = mapped_column(
-        BigInteger,
-        default=0,
-        server_default="0",
-        nullable=False,
-    )
     memory_crisis_seen: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
