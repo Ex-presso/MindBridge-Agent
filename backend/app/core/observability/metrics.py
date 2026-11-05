@@ -38,6 +38,17 @@ LLM_TOKENS = Counter(
     "Tokens reported by the model provider for chat turns.",
     ["provider", "direction"],
 )
+LLM_CALL_SECONDS = Histogram(
+    "llm_call_duration_seconds",
+    "Latency of one model call made by the agent.",
+    ["operation", "outcome"],
+    buckets=_SLOW_BUCKETS,
+)
+CRISIS_TURNS = Counter(
+    "crisis_turns_total",
+    "User turns routed to the crisis path.",
+    ["category"],
+)
 
 
 def record_chat_turn(provider: str, outcome: str, usage: dict) -> None:

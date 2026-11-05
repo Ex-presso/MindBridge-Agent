@@ -25,6 +25,8 @@ from app.core.agent.safety import (
     with_crisis_resources,
 )
 from app.services.memory_selection import render_memory_context, select_memory
+from app.core.observability.instrument import observe_llm_call
+from app.core.observability.metrics import CRISIS_TURNS
 from app.core.rag.retriever import (
     KnowledgeBaseUnavailable,
     format_examples,
@@ -180,6 +182,7 @@ class Agent:
         risk = detect_crisis(self._normalize_content(last_user.content)) if last_user else None
         if risk:
             logger.warning("Crisis detected in user turn: category=%s", risk)
+            CRISIS_TURNS.labels(risk).inc()
         return cast(State, {"risk": risk})
 
     async def _summarize_node(self, state: State) -> State:
@@ -242,7 +245,8 @@ class Agent:
             + f"\nConversation:\n{transcript}"
         )
         summary_llm = self._base_llm.with_config(tags=["internal"])
-        result = await summary_llm.ainvoke([HumanMessage(content=prompt)])
+        with observe_llm_call("summarize"):
+            result = await summary_llm.ainvoke([HumanMessage(content=prompt)])
 
         return cast(
             State,
@@ -436,9 +440,10 @@ class Agent:
         # brief empathic reply under the crisis prompt, then deterministically
         # append crisis resources so referral is guaranteed regardless of model.
         if state.get("risk"):
-            crisis_reply = await self._base_llm.ainvoke(
-                [SystemMessage(content=CRISIS_SYSTEM_PROMPT), HumanMessage(content=normalized_user)]
-            )
+            with observe_llm_call("crisis"):
+                crisis_reply = await self._base_llm.ainvoke(
+                    [SystemMessage(content=CRISIS_SYSTEM_PROMPT), HumanMessage(content=normalized_user)]
+                )
             return cast(
                 State,
                 {
@@ -496,7 +501,8 @@ class Agent:
         llm_input.extend(working_messages)
 
         try:
-            response = await self.llm.ainvoke(llm_input)
+            with observe_llm_call("chat"):
+                response = await self.llm.ainvoke(llm_input)
         except Exception as exc:
             # Some provider exceptions include a repr of the complete request.
             # LangGraph persists node failures in checkpoint pending_writes, so
@@ -745,7 +751,8 @@ class Agent:
         For side tasks like title generation that must NOT be wrapped in the
         Rogerian prompt or trigger the RAG tool.
         """
-        result = await self._base_llm.ainvoke(list(messages))
+        with observe_llm_call("title"):
+            result = await self._base_llm.ainvoke(list(messages))
         return self._normalize_content(result.content)
 
     async def ainvoke(
