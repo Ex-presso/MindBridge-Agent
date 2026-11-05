@@ -1,8 +1,8 @@
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import logging
-from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
+from typing import Annotated, Any, TypedDict, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -24,7 +24,7 @@ from app.core.agent.safety import (
     detect_crisis,
     with_crisis_resources,
 )
-from app.services.memory_selection import render_memory_context, select_memory
+from app.core.memory import MemoryRecord, get_memory_client, render_memory_context
 from app.core.observability.instrument import observe_llm_call
 from app.core.observability.metrics import CRISIS_TURNS
 from app.core.rag.retriever import (
@@ -34,10 +34,8 @@ from app.core.rag.retriever import (
 )
 from config.settings import settings
 
-if TYPE_CHECKING:
-    from app.services.memory_selection import MemorySelection
-
-EpisodeEligibilityGuard = Callable[[tuple[str, ...]], Awaitable[set[str]]]
+# Given conversation ids, returns those whose memories may still be recalled.
+ConversationGuard = Callable[[tuple[str, ...]], Awaitable[set[str]]]
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +82,14 @@ class AgentRunContext:
     memory_enabled: bool = False
     memory_data_epoch: int = 0
     thread_id: str | None = None
-    selection: "MemorySelection | None" = field(default=None, repr=False)
-    episode_guard: EpisodeEligibilityGuard | None = field(default=None, repr=False)
+    memories: list[MemoryRecord] = field(default_factory=list, repr=False)
+    conversation_guard: ConversationGuard | None = field(default=None, repr=False)
 
 
 class Agent:
     """LangGraph-driven mental health agent with conditional RAG tool usage."""
 
-    def __init__(self, base_llm, checkpointer=None, store=None):
+    def __init__(self, base_llm, checkpointer=None):
         self.system_prompt = """
         You are a compassionate mental health assistant practicing Rogerian (person-centered) therapy principles.
 
@@ -125,7 +123,7 @@ class Agent:
             "to share how they are feeling instead of answering the unrelated question."
         )
 
-        self.app = self._build_graph().compile(checkpointer=checkpointer, store=store)
+        self.app = self._build_graph().compile(checkpointer=checkpointer)
 
     def _build_tools(self) -> dict[str, StructuredTool]:
         """Create the tool set exposed to the LLM."""
@@ -292,24 +290,23 @@ class Agent:
         state: State,
         runtime: Runtime[AgentRunContext],
     ) -> State:
-        """Load read-only durable memory into the invocation-scoped context.
+        """Recall durable memories into the invocation-scoped context.
 
         The result deliberately lives on ``runtime.context`` rather than graph
-        state, so neither the rendered prompt block nor the selected records can
-        be serialized by the checkpointer. The same context object remains
+        state, so neither the rendered prompt block nor the recalled records
+        can be serialized by the checkpointer. The same context object remains
         available when the tool loop routes back to ``chat``.
         """
         context = runtime.context
-        context.selection = None
+        context.memories = []
 
-        # These guards are also privacy guarantees: no Store method is touched
-        # unless both the deployment and this user have explicitly opted in.
+        # These guards are also privacy guarantees: mem0 is not touched unless
+        # both the deployment and this user have explicitly opted in.
         if (
             state.get("risk")
             or not settings.MEMORY_ENABLED
             or not context.memory_enabled
             or not context.user_id
-            or runtime.store is None
         ):
             return cast(State, {})
 
@@ -317,75 +314,38 @@ class Agent:
             (m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
             None,
         )
-        if last_user is None:
-            return cast(State, {})
-
-        query = self._normalize_content(last_user.content).strip()
+        query = self._normalize_content(last_user.content).strip() if last_user else ""
         if not query:
             return cast(State, {})
 
         try:
-            context.selection = await select_memory(
-                runtime.store,
-                context.user_id,
+            client = await get_memory_client()
+            found = await client.search(
                 query,
-                current_thread_id=context.thread_id,
-                semantic_limit=settings.MEMORY_SELECT_SEMANTIC_LIMIT,
-                episode_limit=settings.MEMORY_SELECT_EPISODE_TOP_K,
-                semantic_item_char_limit=settings.MEMORY_SEMANTIC_ITEM_MAX_CHARS,
-                episode_summary_char_limit=settings.MEMORY_EPISODE_SUMMARY_MAX_CHARS,
-                episode_topic_char_limit=settings.MEMORY_EPISODE_TOPIC_MAX_CHARS,
-                episode_min_score=settings.MEMORY_EPISODE_MIN_SCORE,
-                expected_data_epoch=context.memory_data_epoch,
+                user_id=context.user_id,
+                data_epoch=context.memory_data_epoch,
+                limit=settings.MEMORY_SEARCH_LIMIT,
+                min_similarity=settings.MEMORY_MIN_SIMILARITY,
             )
+            # This conversation's own turns are already in the prompt.
+            found = [
+                record
+                for record in found
+                if record.conversation_id and record.conversation_id != context.thread_id
+            ]
+            if found and context.conversation_guard is not None:
+                # A conversation that later hit a crisis turn or was deleted
+                # must not contribute, even if its cleanup job has not run yet.
+                allowed = await context.conversation_guard(
+                    tuple({record.conversation_id for record in found})
+                )
+                context.memories = [
+                    record for record in found if record.conversation_id in allowed
+                ]
         except Exception as exc:
-            # Durable memory is assistive context, never a prerequisite for a
-            # safe chat response. Namespace violations and Store outages both
-            # fail closed by injecting nothing.
-            logger.warning(
-                "Durable memory selection failed; error_type=%s",
-                type(exc).__name__,
-            )
-            context.selection = None
-        else:
-            selection = context.selection
-            if selection is not None and selection.episodes:
-                guard = context.episode_guard
-                if guard is None:
-                    context.selection = replace(
-                        selection,
-                        episodes=(),
-                        episode_status="guard_unavailable",
-                    )
-                else:
-                    try:
-                        requested_ids = tuple(
-                            episode.thread_id for episode in selection.episodes
-                        )
-                        allowed_ids = await guard(requested_ids)
-                        if not isinstance(allowed_ids, set) or not all(
-                            isinstance(item, str) for item in allowed_ids
-                        ):
-                            raise TypeError("Episode guard returned an invalid result.")
-                    except Exception as exc:
-                        logger.warning(
-                            "Episode memory eligibility check failed; error_type=%s",
-                            type(exc).__name__,
-                        )
-                        context.selection = replace(
-                            selection,
-                            episodes=(),
-                            episode_status="guard_failed",
-                        )
-                    else:
-                        context.selection = replace(
-                            selection,
-                            episodes=tuple(
-                                episode
-                                for episode in selection.episodes
-                                if episode.thread_id in allowed_ids
-                            ),
-                        )
+            # Memory is assistive context, never a prerequisite for a reply.
+            logger.warning("Memory recall failed; error_type=%s", type(exc).__name__)
+            context.memories = []
         return cast(State, {})
 
     async def _chat_node(
@@ -453,14 +413,8 @@ class Agent:
                 },
             )
 
-        selection = runtime.context.selection
-        has_selected_memory = selection is not None and bool(
-            selection.semantic or selection.episodes
-        )
-        is_direct_memory_query = (
-            has_selected_memory
-            and self._is_direct_memory_query(normalized_user)
-        )
+        memories = runtime.context.memories
+        is_direct_memory_query = bool(memories) and self._is_direct_memory_query(normalized_user)
         is_related = (
             self._is_mental_health_related(normalized_user)
             or is_direct_memory_query
@@ -476,28 +430,12 @@ class Agent:
         summary = state.get("summary")
         if summary:
             llm_input.append(SystemMessage(content=f"Summary of earlier conversation: {summary}"))
-        if runtime.context.selection is not None:
-            try:
-                memory_context = render_memory_context(
-                    runtime.context.selection,
-                    total_char_limit=settings.MEMORY_CONTEXT_MAX_CHARS,
-                    semantic_item_char_limit=settings.MEMORY_SEMANTIC_ITEM_MAX_CHARS,
-                    episode_summary_char_limit=settings.MEMORY_EPISODE_SUMMARY_MAX_CHARS,
-                    episode_topic_char_limit=settings.MEMORY_EPISODE_TOPIC_MAX_CHARS,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to render selected durable memory; error_type=%s",
-                    type(exc).__name__,
-                )
-            else:
-                if memory_context:
-                    # Prompt-local only: never append this message to State.
-                    llm_input.append(SystemMessage(content=memory_context))
-                    if is_direct_memory_query:
-                        llm_input.append(
-                            SystemMessage(content=_DIRECT_MEMORY_INSTRUCTION)
-                        )
+        memory_context = render_memory_context(memories, settings.MEMORY_CONTEXT_MAX_CHARS)
+        if memory_context:
+            # Prompt-local only: never append this message to State.
+            llm_input.append(SystemMessage(content=memory_context))
+            if is_direct_memory_query:
+                llm_input.append(SystemMessage(content=_DIRECT_MEMORY_INSTRUCTION))
         llm_input.extend(working_messages)
 
         try:
@@ -765,7 +703,7 @@ class Agent:
         user_id: str | None = None,
         memory_enabled: bool = False,
         memory_data_epoch: int = 0,
-        episode_guard: EpisodeEligibilityGuard | None = None,
+        conversation_guard: ConversationGuard | None = None,
     ) -> str:
         """Invoke with checkpointer — only pass the new message, history is in checkpoint."""
         config = {"configurable": {"thread_id": thread_id}}
@@ -774,7 +712,7 @@ class Agent:
             memory_enabled=memory_enabled,
             memory_data_epoch=memory_data_epoch,
             thread_id=thread_id,
-            episode_guard=episode_guard,
+            conversation_guard=conversation_guard,
         )
         crisis = detect_crisis(self._normalize_content(new_message.content))
         try:
@@ -807,7 +745,7 @@ class Agent:
         user_id: str | None = None,
         memory_enabled: bool = False,
         memory_data_epoch: int = 0,
-        episode_guard: EpisodeEligibilityGuard | None = None,
+        conversation_guard: ConversationGuard | None = None,
     ) -> AsyncGenerator[str, None]:
         """Async generator that yields text tokens as they stream from the LLM."""
         config = {"configurable": {"thread_id": thread_id}}
@@ -816,7 +754,7 @@ class Agent:
             memory_enabled=memory_enabled,
             memory_data_epoch=memory_data_epoch,
             thread_id=thread_id,
-            episode_guard=episode_guard,
+            conversation_guard=conversation_guard,
         )
         crisis = detect_crisis(self._normalize_content(new_message.content))
         try:

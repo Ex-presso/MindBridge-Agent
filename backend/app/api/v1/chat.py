@@ -51,8 +51,8 @@ _TITLE_UPDATE_TIMEOUT_SECONDS = 15.0
 _RUNTIME_EVICTION_TIMEOUT_SECONDS = 1.0
 
 
-def _episode_guard(db, user_id: uuid.UUID):
-    """Build a request-local relational eligibility check for Store episodes."""
+def _conversation_guard(db, user_id: uuid.UUID):
+    """Build a request-local check of which conversations may still supply memories."""
 
     async def guard(raw_ids: tuple[str, ...]) -> set[str]:
         parsed_ids: list[uuid.UUID] = []
@@ -120,7 +120,6 @@ def _get_agent(
     base_url: str | None,
     api_key: str,
     checkpointer,
-    store=None,
     *,
     user_id: str,
 ) -> "Agent":
@@ -134,12 +133,11 @@ def _get_agent(
         base_url,
         hashlib.sha256(api_key.encode()).hexdigest(),
         id(checkpointer),
-        id(store),
     )
     agent = _AGENT_CACHE.get(key)
     if agent is None:
         llm = get_llm(provider, api_key=api_key, base_url=base_url, model=model)
-        agent = Agent(llm, checkpointer=checkpointer, store=store)
+        agent = Agent(llm, checkpointer=checkpointer)
         _AGENT_CACHE[key] = agent
         if len(_AGENT_CACHE) > _AGENT_CACHE_MAX:
             _AGENT_CACHE.popitem(last=False)
@@ -217,7 +215,6 @@ async def _save_generated_title_if_present(
                         key_record.base_url,
                         decrypt_value(key_record.api_key_encrypted),
                         getattr(request.app.state, "checkpointer", None),
-                        getattr(request.app.state, "store", None),
                         user_id=str(user_id),
                     )
                     title = await conversation_service.generate_title(
@@ -301,7 +298,6 @@ async def session_chat(
     from app.core.auth.encryption import decrypt_value
 
     checkpointer = getattr(request.app.state, "checkpointer", None)
-    store = getattr(request.app.state, "store", None)
 
     # Global lock order starts with a User KEY SHARE deletion barrier. Account
     # deletion takes FOR UPDATE, commits its tombstone, and prevents any later
@@ -443,7 +439,6 @@ async def session_chat(
                                                 run_key_record.api_key_encrypted
                                             ),
                                             checkpointer,
-                                            store,
                                             user_id=str(user.id),
                                         )
                                         tokens = chat_service.stream_chat_session(
@@ -453,7 +448,7 @@ async def session_chat(
                                             user_id=str(user.id),
                                             memory_enabled=memory_access.enabled,
                                             memory_data_epoch=memory_access.data_epoch,
-                                            episode_guard=_episode_guard(
+                                            conversation_guard=_conversation_guard(
                                                 session,
                                                 user.id,
                                             ),
@@ -601,7 +596,6 @@ async def session_chat(
                     run_key_record.base_url,
                     decrypt_value(run_key_record.api_key_encrypted),
                     checkpointer,
-                    store,
                     user_id=str(user.id),
                 )
                 reply = await chat_service.run_chat_session(
@@ -611,7 +605,7 @@ async def session_chat(
                     user_id=str(user.id),
                     memory_enabled=memory_access.enabled,
                     memory_data_epoch=memory_access.data_epoch,
-                    episode_guard=_episode_guard(session, user.id),
+                    conversation_guard=_conversation_guard(session, user.id),
                     usage_sink=usage,
                 )
                 if not reply.strip():

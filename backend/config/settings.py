@@ -40,12 +40,12 @@ class Settings(BaseSettings):
     # Global kill switch for durable, cross-conversation memory. Per-user
     # consent is stored separately on User.memory_enabled and defaults off.
     MEMORY_ENABLED: bool = False
-    MEMORY_SELECT_SEMANTIC_LIMIT: int = Field(default=12, ge=1, le=100)
-    MEMORY_SELECT_EPISODE_TOP_K: int = Field(default=3, ge=1, le=20)
-    MEMORY_EPISODE_MIN_SCORE: float = Field(default=0.55, ge=-1, le=1)
-    MEMORY_SEMANTIC_ITEM_MAX_CHARS: int = Field(default=280, ge=50, le=2000)
-    MEMORY_EPISODE_SUMMARY_MAX_CHARS: int = Field(default=800, ge=100, le=5000)
-    MEMORY_EPISODE_TOPIC_MAX_CHARS: int = Field(default=80, ge=10, le=500)
+    # Recall: how many memories one turn may receive, and the cosine similarity
+    # a memory needs to qualify. Measured with the default embedding model on
+    # seven fact/message pairs: related pairs scored 0.60 or higher, unrelated
+    # messages 0.58 or lower. Recalibrate after changing the model.
+    MEMORY_SEARCH_LIMIT: int = Field(default=5, ge=1, le=20)
+    MEMORY_MIN_SIMILARITY: float = Field(default=0.59, ge=0, le=1)
     MEMORY_CONTEXT_MAX_CHARS: int = Field(default=4000, ge=500, le=20000)
     MEMORY_EMBED_DIMS: int = Field(default=1024, ge=1)
     # pgvector table that mem0 creates and owns.
