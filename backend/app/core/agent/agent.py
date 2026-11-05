@@ -582,12 +582,8 @@ class Agent:
                 args["query"] = ""
 
             try:
-                logger.info(
-                    "Invoking tool '%s' with args=%s (call_id=%s)",
-                    name,
-                    args,
-                    call_id,
-                )
+                # Arguments stay out of the log: the query restates the user's concern.
+                logger.info("Invoking tool '%s' (call_id=%s)", name, call_id)
                 output = await tool.ainvoke(args)
                 logger.info("Tool '%s' completed successfully (call_id=%s)", name, call_id)
             except Exception as exc:
