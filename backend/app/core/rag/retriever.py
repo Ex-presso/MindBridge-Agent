@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.rag.knowledge_base import example_id, open_store
+from app.core.rag.knowledge_base import example_id, open_store, read_index_state
 from config.settings import settings
 
 _QUESTION_DISPLAY_CHARS = 500
@@ -21,6 +21,35 @@ class RetrievedExample:
     similarity: float
 
 
+class KnowledgeBaseUnavailable(RuntimeError):
+    """The index is missing, incomplete, or built with another embedding model."""
+
+
+def _verify_index() -> None:
+    """Fail loudly instead of searching an index that would answer wrongly.
+
+    A missing or half-built index returns few or no results, and vectors from
+    another embedding model return unrelated ones. Neither raises on its own.
+    """
+    name = settings.RAG_COLLECTION
+    rebuild = "Rebuild it with: python -m app.core.rag.knowledge_base"
+    state = read_index_state(name)
+    if state is None or state[1] == 0:
+        raise KnowledgeBaseUnavailable(f"Knowledge base '{name}' has not been built. {rebuild}")
+    metadata, stored = state
+    if stored < int(metadata.get("examples", 0)):
+        raise KnowledgeBaseUnavailable(
+            f"Knowledge base '{name}' is incomplete: {stored} of "
+            f"{metadata['examples']} examples stored. {rebuild}"
+        )
+    if metadata.get("embedding_model") != settings.EMBEDDING_MODEL:
+        raise KnowledgeBaseUnavailable(
+            f"Knowledge base '{name}' was embedded with "
+            f"{metadata.get('embedding_model')!r}, but EMBEDDING_MODEL is "
+            f"{settings.EMBEDDING_MODEL!r}. {rebuild}"
+        )
+
+
 class ExampleRetriever:
     """Finds the indexed client questions closest to a query."""
 
@@ -29,7 +58,8 @@ class ExampleRetriever:
 
     @classmethod
     def open(cls) -> "ExampleRetriever":
-        """Blocking: loads the embedding model."""
+        """Blocking: checks the index, then loads the embedding model."""
+        _verify_index()
         return cls(open_store(async_mode=True))
 
     async def search(self, query: str, k: int) -> list[RetrievedExample]:

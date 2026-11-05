@@ -95,7 +95,16 @@ def build_index(
     from tqdm import tqdm
 
     examples = load_examples(max_samples)
-    store = open_store(collection_name=collection_name, pre_delete_collection=True)
+    store = open_store(
+        collection_name=collection_name,
+        pre_delete_collection=True,
+        # Read back by read_index_state() so a search can detect an index that
+        # is incomplete or was embedded with a different model.
+        collection_metadata={
+            "embedding_model": settings.EMBEDDING_MODEL,
+            "examples": len(examples),
+        },
+    )
     try:
         # Batches keep each INSERT under PostgreSQL's 65,535 bind parameters.
         for start in tqdm(
@@ -115,6 +124,34 @@ def build_index(
         store.delete_collection()
         raise
     return len(examples)
+
+
+def read_index_state(collection_name: str | None = None) -> tuple[dict[str, Any], int] | None:
+    """Return the collection's build metadata and stored row count.
+
+    None means the collection was never built.
+    """
+    import sqlalchemy
+    from sqlalchemy.exc import ProgrammingError
+
+    query = sqlalchemy.text(
+        "SELECT c.cmetadata, "
+        "(SELECT count(*) FROM langchain_pg_embedding e WHERE e.collection_id = c.uuid) "
+        "FROM langchain_pg_collection c WHERE c.name = :name"
+    )
+    engine = sqlalchemy.create_engine(settings.DATABASE_URL)
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(
+                query, {"name": collection_name or settings.RAG_COLLECTION}
+            ).first()
+    except ProgrammingError:
+        return None  # The pgvector tables do not exist yet.
+    finally:
+        engine.dispose()
+    if row is None:
+        return None
+    return dict(row[0] or {}), int(row[1])
 
 
 if __name__ == "__main__":

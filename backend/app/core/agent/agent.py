@@ -25,7 +25,11 @@ from app.core.agent.safety import (
     with_crisis_resources,
 )
 from app.services.memory_selection import render_memory_context, select_memory
-from app.core.rag.retriever import format_examples, search_examples
+from app.core.rag.retriever import (
+    KnowledgeBaseUnavailable,
+    format_examples,
+    search_examples,
+)
 from config.settings import settings
 
 if TYPE_CHECKING:
@@ -129,7 +133,12 @@ class Agent:
             if not normalized_query:
                 return "No counselor examples were retrieved because the query was empty."
 
-            examples = await search_examples(normalized_query, k=self._rag_top_k)
+            try:
+                examples = await search_examples(normalized_query, k=self._rag_top_k)
+            except KnowledgeBaseUnavailable as exc:
+                # The chat still works without examples; the operator sees why.
+                logger.error("%s", exc)
+                return "The knowledge base is unavailable. Answer without retrieved examples."
             # Counts and scores only: the query is the user's concern in their own words.
             logger.info(
                 "RAG retrieved %s example(s); similarities=%s",
