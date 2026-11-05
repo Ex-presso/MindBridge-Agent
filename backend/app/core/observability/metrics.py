@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import time
 
-from prometheus_client import Histogram
+from prometheus_client import Counter, Histogram
+
+# Model calls and streamed turns run for seconds, not the milliseconds that the
+# default buckets are spaced for.
+_SLOW_BUCKETS = (0.25, 0.5, 1, 2, 4, 8, 15, 30, 60, 120)
 
 HTTP_REQUEST_SECONDS = Histogram(
     "http_request_duration_seconds",
@@ -18,6 +22,29 @@ HTTP_REQUEST_SECONDS = Histogram(
     ["method", "route", "status"],
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 15, 30, 60, 120),
 )
+CHAT_FIRST_TOKEN_SECONDS = Histogram(
+    "chat_first_token_seconds",
+    "Time from the start of a chat request to its first streamed token.",
+    ["provider"],
+    buckets=_SLOW_BUCKETS,
+)
+CHAT_TURNS = Counter(
+    "chat_turns_total",
+    "Chat turns by outcome.",
+    ["provider", "outcome"],
+)
+LLM_TOKENS = Counter(
+    "llm_tokens_total",
+    "Tokens reported by the model provider for chat turns.",
+    ["provider", "direction"],
+)
+
+
+def record_chat_turn(provider: str, outcome: str, usage: dict) -> None:
+    """Count one finished chat turn and the tokens the provider reported for it."""
+    CHAT_TURNS.labels(provider, outcome).inc()
+    for direction in ("input", "output"):
+        LLM_TOKENS.labels(provider, direction).inc(usage.get(direction, 0))
 
 
 class MetricsMiddleware:

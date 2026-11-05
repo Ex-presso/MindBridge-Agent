@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.auth.deps import get_current_user
 from app.core.agent.safety import CRISIS_DETECTOR_VERSION, detect_crisis
+from app.core.observability.metrics import CHAT_FIRST_TOKEN_SECONDS, record_chat_turn
 from app.db.engine import get_db
 from app.db.models.user import User
 from app.db.repositories import (
@@ -458,6 +459,10 @@ async def session_chat(
                                         )
                                         async with aclosing(tokens) as token_stream:
                                             async for token in token_stream:
+                                                if not collected:
+                                                    CHAT_FIRST_TOKEN_SECONDS.labels(provider).observe(
+                                                        time.time() - t_start
+                                                    )
                                                 collected.append(token)
                                                 # JSON-encode so token newlines cannot break
                                                 # the SSE frame delimiter.
@@ -533,8 +538,7 @@ async def session_chat(
                 # Persistence and the generation lock are complete before DONE.
                 yield b"data: [DONE]\n\n"
             finally:
-                # Request-level observability. A tracer (Langfuse/LangSmith) is
-                # the drop-in upgrade; this line already backs a latency/cost panel.
+                record_chat_turn(provider, "ok" if completed else "failed", usage)
                 logger.info(
                     "chat stream: conv=%s provider=%s model=%s tokens=%s latency=%.2fs",
                     conv_id_str,
@@ -553,6 +557,7 @@ async def session_chat(
     # Non-streaming
     usage: dict = {}
     run_agent = None
+    outcome = "failed"
     try:
         async with request.app.state.db_session() as session:
             async with session.begin():
@@ -634,11 +639,14 @@ async def session_chat(
                     provider=provider,
                     model=body.model,
                 )
+        outcome = "ok"
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Non-streaming chat failed for conversation %s", conv_id_str)
         raise HTTPException(status_code=500, detail="Generation failed.") from exc
+    finally:
+        record_chat_turn(provider, outcome, usage)
 
     if is_new_conversation and run_agent is not None:
         _schedule_title_update(

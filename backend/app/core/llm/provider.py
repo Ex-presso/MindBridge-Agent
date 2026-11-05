@@ -110,6 +110,9 @@ def get_llm(
         kwargs: dict = {
             "model": resolved_model,
             "temperature": resolved_temperature,
+            # Ask for token usage on streamed replies too. LangChain only does
+            # this by default for the official OpenAI base URL.
+            "stream_usage": True,
         }
         if is_deepseek:
             # DeepSeek thinking mode rejects the forced tool choice used by
