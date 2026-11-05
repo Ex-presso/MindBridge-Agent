@@ -46,5 +46,24 @@ services:
       - backend
     restart: unless-stopped
 
+  # Optional. Start with `docker compose --profile observability up -d` and set
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 in backend/.env.
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    container_name: mindbridge-jaeger
+    profiles: ["observability"]
+    ports:
+      - "16686:16686" # trace UI
+      - "4318:4318" # OTLP/HTTP ingest
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    container_name: mindbridge-prometheus
+    profiles: ["observability"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
 volumes:
   mindbridge_pgdata:
